@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alphacar-be-config
+  namespace: apc-be-ns
+data:
+  # 데이터베이스 주소 (DB 네임스페이스 참조)
+  MONGO_HOST: "alphacar-mongo.alphacar-db-ns.svc.cluster.local"
+  MONGO_PORT: "27017"
+  MARIADB_HOST: "alphacar-maria.alphacar-db-ns.svc.cluster.local"
+  MARIADB_PORT: "3306"
+  REDIS_HOST: "alphacar-redis.alphacar-db-ns.svc.cluster.local"
+  REDIS_PORT: "6379"
+  
+  # 관측성 설정 (OBSV 네임스페이스 참조)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy.alphacar-obsv-ns.svc.cluster.local:4317"
+  
+  # AWS/AI 설정
+  AWS_REGION: "us-east-1"
+  BEDROCK_GUARDRAIL_ID: "nfdfeln14bg7"
+  BEDROCK_GUARDRAIL_VERSION: "DRAFT"
+  BEDROCK_EMBEDDING_MODEL_ID: "amazon.titan-embed-text-v2:0"
+  BEDROCK_LLM_MODEL_ID: "meta.llama3-3-70b-instruct-v1:0"

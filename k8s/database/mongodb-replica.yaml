@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: apc-db-ns
+  labels:
+    app: mongodb
+spec:
+  clusterIP: None
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongodb
+  selector:
+    app: mongodb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: apc-db-ns
+  labels:
+    app: mongodb
+spec:
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongodb
+  selector:
+    app: mongodb
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /data/mongodb
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: apc-db-ns
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: mongodb-pv
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: apc-db-ns
+spec:
+  serviceName: mongodb-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:8.0
+        command:
+        - bash
+        - -c
+        - |
+          if [ ! -f /data/db/.mongodb_initialized ]; then
+            echo "MongoDB 초기화 중..."
+            mongod --bind_ip_all --port=27017 --dbpath=/data/db --fork --logpath=/var/log/mongodb/mongod.log
+            sleep 5
+            mongosh --eval "db.getSiblingDB('admin').createUser({user: 'admin', pwd: '123', roles: [{role: 'root', db: 'admin'}]})" || echo "root 사용자 이미 존재"
+            mongosh admin -u admin -p 123 --eval "db.getSiblingDB('admin').createUser({user: 'triple_user', pwd: 'triple_password', roles: [{role: 'readWrite', db: 'triple_db'}, {role: 'dbAdmin', db: 'triple_db'}]})" || echo "triple_user 사용자 이미 존재"
+            mongosh admin -u admin -p 123 --eval "db.getSiblingDB('triple_db').createCollection('init')" || echo "데이터베이스 이미 존재"
+            mongosh admin -u admin -p 123 --eval "db.shutdownServer()"
+            touch /data/db/.mongodb_initialized
+          fi
+          exec mongod --bind_ip_all --port=27017 --replSet=rs0 --dbpath=/data/db
+        ports:
+        - containerPort: 27017
+          name: mongodb
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: "admin"
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: "123"
+        - name: MONGO_INITDB_DATABASE
+          value: "triple_db"
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+        - name: mongodb-config
+          mountPath: /data/configdb
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: mongodb-config
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app: mongodb
+        component: database
+        storage-type: longhorn
+      annotations:
+        description: "MongoDB data volume for pod"
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: longhorn
+      resources:
+        requests:
+          storage: 20Gi
+

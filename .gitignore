@@ -1,0 +1,86 @@
+# Secrets - 절대 커밋하지 말 것!
+**/secret*.yaml
+**/*secret*.yaml
+!**/*secret*.yaml.template
+!**/*secret*.yaml.example
+k8s/configmap-secret/secret-aws-bedrock.yaml
+k8s/configmap-secret/secret-db.yaml
+k8s/monitoring-analysis/secret.yaml
+
+# Secret documentation - 절대 커밋하지 말 것!
+SECRETS_FOR_MULTIMASTER.md
+*SECRETS*.md
+*SECRET*.md
+
+# AWS Credentials
+**/aws-bedrock-secret.yaml
+**/*aws*.yaml
+!**/*aws*.yaml.template
+!**/*aws*.yaml.example
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Backups
+*.tar.gz
+*.backup
+*backup*
+alphacar-backup-*.tar.gz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Build artifacts
+dist/
+build/
+*.class
+*.jar
+*.war
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore.bak
+

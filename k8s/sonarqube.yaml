@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube-db
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube-db
+  template:
+    metadata:
+      labels:
+        app: sonarqube-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_USER
+          value: "sonar"
+        - name: POSTGRES_PASSWORD
+          value: "sonar"
+        - name: POSTGRES_DB
+          value: "sonar"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube-db
+  namespace: apc-cicd-ns
+spec:
+  ports:
+  - port: 5432
+  selector:
+    app: sonarqube-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+      - name: sonarqube
+        image: sonarqube:lts-community
+        ports:
+        - containerPort: 9000
+          name: http-sonar
+        env:
+        - name: SONAR_JDBC_URL
+          value: "jdbc:postgresql://sonarqube-db:5432/sonar"
+        - name: SONAR_JDBC_USERNAME
+          value: "sonar"
+        - name: SONAR_JDBC_PASSWORD
+          value: "sonar"
+        resources:
+          requests:
+            memory: "1.5Gi" # SonarQube 최소 권장 사양
+            cpu: "200m"
+          limits:
+            memory: "2Gi"   # 3G 노드에서 최대치
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  selector:
+    app: sonarqube
+  ports:
+  - name: http
+    port: 9000
+    targetPort: 9000
