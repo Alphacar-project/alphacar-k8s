@@ -17,7 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: search-backend
-        image: 192.168.0.169/bh/alphacar-search:1.0.1
+        image: 192.168.0.170:30000/alphacar/alphacar-search:1.0.32-c1d0917
         ports:
         - containerPort: 3007
           name: http-search # 서비스 포트 이름과 통일

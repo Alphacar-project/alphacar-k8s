@@ -17,7 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: aichat-backend
-        image: 192.168.0.169/bh/alphacar-aichat:1.0.12
+        image: 192.168.0.170:30000/alphacar/alphacar-aichat:1.0.32-c1d0917
         ports:
         - containerPort: 4000
           name: http-aichat # Istio 가이드에 따라 이름 지정

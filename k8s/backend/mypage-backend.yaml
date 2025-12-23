@@ -17,7 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: mypage-backend
-        image: 192.168.0.169/kdh/alphacar-mypage:1.0.1
+        image: 192.168.0.170:30000/alphacar/alphacar-mypage:1.0.32-c1d0917
         ports:
         - containerPort: 3006
           name: http-mypage # Istio 인식을 위한 포트 이름

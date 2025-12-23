@@ -17,7 +17,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: community-backend
-        image: 192.168.0.169/alphacar-project/alphacar-community:1.0.0
+        image: 192.168.0.170:30000/alphacar/alphacar-community:1.0.32-c1d0917
         ports:
         - containerPort: 3005
           name: http-community # Istio 인식용 포트 이름
