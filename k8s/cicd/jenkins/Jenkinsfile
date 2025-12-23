@@ -1,22 +1,18 @@
 pipeline {
     agent any
 
-    parameters {
-        // [복구] 빌드할 서비스를 선택할 수 있는 파라미터
-        choice(name: 'SERVICE_NAME',
-               choices: ['all', 'aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search'],
-               description: '빌드 및 검사할 서비스를 선택하세요. (기본값: all)')
-        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
-    }
-
     environment {
-        HARBOR_URL = '192.168.0.170:30000'
-        HARBOR_PROJECT = 'alphacar'
-        DOCKER_CREDENTIAL_ID = 'harbor-cred'
+        // 하버 및 도커 설정
+        HARBOR_URL      = '192.168.0.170:30000'
+        HARBOR_PROJECT  = 'alphacar'
+        HARBOR_CRED_ID  = 'harbor-cred'
+        
+        // 깃허브 설정 (Manifest 레포지토리)
         GIT_CREDENTIAL_ID = 'github-cred'
-        SONARQUBE_NAME = 'SonarQube'
-        SONAR_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+        
+        // 대상 서비스 목록
+        SERVICES = "aichat community main mypage news quote search"
     }
 
     stages {
@@ -25,16 +21,11 @@ pipeline {
                 cleanWs()
                 checkout scm
                 script {
+                    // 공통 버전 및 태그 생성
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                    env.FULL_VERSION = "${params.VERSION}.${currentBuild.number}-${env.GIT_SHA}"
-
-                    // 빌드 대상 목록 설정
-                    if (params.SERVICE_NAME == 'all') {
-                        env.SERVICES_LIST = 'aichat community main mypage news quote search'
-                    } else {
-                        env.SERVICES_LIST = params.SERVICE_NAME
-                    }
-                    echo "🚀 대상 서비스: ${env.SERVICES_LIST}"
+                    env.FULL_VERSION = "1.0.${currentBuild.number}-${env.GIT_SHA}"
+                    echo "🚀 대상 서비스: ${env.SERVICES}"
+                    echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
             }
         }
@@ -43,21 +34,24 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    def services = env.SERVICES_LIST.split(' ')
-
-                    withSonarQubeEnv("${env.SONARQUBE_NAME}") {
-                        for (service in services) {
-                            echo "🔍 [${service}] 소나큐브 분석 시작..."
-                            sh """
-                                ${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.projectKey=alphacar-${service} \
-                                -Dsonar.projectName=alphacar-${service} \
-                                -Dsonar.sources=dev/alphacar/backend/${service} \
-                                -Dsonar.host.url=${env.SONAR_URL} \
-                                -Dsonar.language=java \
-                                -Dsonar.exclusions=**/*.kotlin,**/*.kt,**/test/** \
-                                -Dsonar.scanner.timeout=300
-                            """
+                    def serviceList = env.SERVICES.split(' ')
+                    
+                    for (service in serviceList) {
+                        echo "🔍 [${service}] 소나큐브 분석 시작..."
+                        // 네트워크 불안정 대비 retry 추가
+                        retry(2) {
+                            withSonarQubeEnv('SonarQube') {
+                                sh """
+                                    ${scannerHome}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=alphacar-${service} \
+                                    -Dsonar.projectName=alphacar-${service} \
+                                    -Dsonar.sources=dev/alphacar/backend/${service} \
+                                    -Dsonar.host.url=http://192.168.0.170:32000 \
+                                    -Dsonar.language=java \
+                                    -Dsonar.exclusions=**/*.kotlin,**/*.kt,**/test/** \
+                                    -Dsonar.scanner.timeout=300
+                                """
+                            }
                         }
                     }
                 }
@@ -67,31 +61,35 @@ pipeline {
         stage('3. 병렬 빌드 & 푸시 (Batch)') {
             steps {
                 script {
-                    def serviceList = env.SERVICES_LIST.split(' ')
-                    // 리소스 보호를 위해 2개씩 순차 병렬 처리
-                    for (int i = 0; i < serviceList.size(); i += 2) {
-                        def batch = serviceList[i..(Math.min(i + 1, serviceList.size() - 1))]
-                        def actions = [:]
+                    def serviceList = env.SERVICES.split(' ')
+                    def tasks = [:]
 
-                        batch.each { service ->
-                            actions["Build-${service}"] = {
-                                stage("Process ${service}") {
-                                    // [수정] tsconfig.json을 찾을 수 있도록 각 서비스 폴더로 직접 진입
-                                    dir("dev/alphacar/backend/${service}") {
-                                        // [수정] 빌드 컨텍스트를 현재 폴더(.)로 지정
-                                        sh "docker build -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION} -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest ."
+                    for (service in serviceList) {
+                        def currentService = service
+                        tasks["Build-${currentService}"] = {
+                            stage("Process ${currentService}") {
+                                // Dockerfile이 있는 디렉토리로 이동
+                                dir("dev/alphacar/backend/${currentService}") {
+                                    def imageTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${currentService}:${env.FULL_VERSION}"
+                                    def latestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${currentService}:latest"
 
-                                        withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                                            sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
-                                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}"
-                                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest"
-                                        }
+                                    echo "🐳 ${currentService} 빌드 및 푸시 중..."
+                                    
+                                    // 빌드 시 BuildKit 에러 방지를 위해 표준 빌드 사용
+                                    sh "docker build -t ${imageTag} -t ${latestTag} ."
+
+                                    withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CRED_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                                        sh """
+                                            echo "${PASS}" | docker login ${HARBOR_URL} -u ${USER} --password-stdin
+                                            docker push ${imageTag}
+                                            docker push ${latestTag}
+                                        """
                                     }
                                 }
                             }
                         }
-                        parallel actions
                     }
+                    parallel tasks
                 }
             }
         }
@@ -99,29 +97,34 @@ pipeline {
         stage('4. Update Manifests & GitOps') {
             steps {
                 script {
+                    // 별도 디렉토리에서 Manifest 레포지토리 체크아웃
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM',
-                            branches: [[name: 'main']],
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
 
-                        def serviceList = env.SERVICES_LIST.split(' ')
+                        def serviceList = env.SERVICES.split(' ')
                         for (service in serviceList) {
-                            def yamlPath = "k8s/backend/${service}-backend.yaml"
                             sh """
-                                if [ -f "${yamlPath}" ]; then
-                                    sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' ${yamlPath}
+                                if [ -f "k8s/backend/${service}-backend.yaml" ]; then
+                                    echo "📝 업데이트: ${service}"
+                                    sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' k8s/backend/${service}-backend.yaml
                                 fi
                             """
                         }
 
+                        // Git Commit 및 Push (Detached HEAD 에러 해결)
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
                             git add .
                             if [ -n "\$(git status --porcelain)" ]; then
-                                git commit -m "Update images to ${env.FULL_VERSION} [skip ci]"
-                                git push origin main
+                                git commit -m "Update backend images to ${env.FULL_VERSION} [skip ci]"
+                                # HEAD를 원격 main으로 명시하여 푸시
+                                git push origin HEAD:main
+                            else
+                                echo "변경사항 없음"
                             fi
                         """
                     }
@@ -132,6 +135,7 @@ pipeline {
 
     post {
         always {
+            // 미사용 이미지 정리 및 워크스페이스 청소
             sh "docker image prune -f"
             cleanWs()
         }
