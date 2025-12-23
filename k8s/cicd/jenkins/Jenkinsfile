@@ -139,7 +139,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: frontend-scaler
-  namespace: apc-fe-ns  # 프론트엔드 네임스페이스
+  namespace: apc-fe-ns  
 spec:
   scaleTargetRef:
     name: frontend      # Deployment 이름
