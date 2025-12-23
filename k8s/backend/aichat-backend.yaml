@@ -20,7 +20,7 @@ spec:
         image: 192.168.0.169/bh/alphacar-aichat:1.0.12
         ports:
         - containerPort: 4000
-          name: http
+          name: http-aichat # Istio 가이드에 따라 이름 지정
         env:
         - name: PORT
           value: "4000"
@@ -78,7 +78,7 @@ spec:
             secretKeyRef:
               name: alphacar-aichat-secret
               key: MONGO_PASS
-        - name: DATABASE_NAME # alphacar-be-secret에 정의된 공통 DB명 사용
+        - name: DATABASE_NAME
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
@@ -123,4 +123,5 @@ spec:
   - port: 4000
     targetPort: 4000
     protocol: TCP
+    name: http-aichat # Istio 프로토콜 분석을 위해 http- 접두사 추가
   type: ClusterIP

@@ -17,19 +17,20 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: mypage-backend
-        image: 192.168.0.169/bh/alphacar-mypage:1.0.1
+        image: 192.168.0.169/kdh/alphacar-mypage:1.0.1
         ports:
         - containerPort: 3006
-          name: http
+          name: http-mypage # Istio 인식을 위한 포트 이름
         env:
         - name: PORT
           value: "3006"
         - name: SERVICE_NAME
           value: "mypage-backend"
-        # BASE_URL은 필요 시 192.168.0.160.nip.io 주소 체계로 변경을 검토하세요.
+        # BASE_URL은 유지하되, 나중에 Istio Gateway 주소로 변경이 필요할 수 있습니다.
         - name: BASE_URL
           value: "https://192.168.56.200:31008"
-        # ConfigMap (alphacar-be-config) 참조
+        
+        # [ConfigMap] alphacar-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -55,7 +56,8 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MARIADB_PORT
-        # Secret (alphacar-be-secret) 참조 - Key 매핑 주의
+
+        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -91,6 +93,7 @@ spec:
             secretKeyRef:
               name: alphacar-be-secret
               key: JWT_SECRET
+
         resources:
           requests:
             memory: "256Mi"
@@ -111,4 +114,5 @@ spec:
   - port: 3006
     targetPort: 3006
     protocol: TCP
+    name: http-mypage # Istio 프로토콜 분석용 접두사 추가
   type: ClusterIP

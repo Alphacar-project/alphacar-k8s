@@ -1,0 +1,28 @@
+# Longhorn RecurringJob을 통한 MongoDB 볼륨 자동 스냅샷
+# 이 설정은 Longhorn UI에서도 생성할 수 있습니다.
+
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: mongodb-daily-snapshot
+  namespace: apc-backup-ns
+spec:
+  name: mongodb-daily-snapshot
+  groups:
+  - mongodb-backup
+  task: snapshot
+  cron: "0 1 * * *"  # 매일 오전 1시 (Velero 백업 전에 실행)
+  retain: 7  # 7일간 보관
+  concurrency: 3  # 동시에 3개 볼륨까지 처리
+---
+# MongoDB 볼륨에 RecurringJob 라벨 추가
+# 주의: 이 방법은 볼륨을 직접 수정해야 하므로, 
+# Longhorn UI에서 수동으로 설정하는 것이 더 안전합니다.
+#
+# Longhorn UI에서 설정하는 방법:
+# 1. Longhorn UI 접속 (http://192.168.0.170:30080)
+# 2. Volume 메뉴에서 MongoDB 볼륨 선택
+# 3. Recurring Jobs 탭에서 "mongodb-daily-snapshot" 추가
+# 4. 또는 각 볼륨에 "recurring-job-group: mongodb-backup" 라벨 추가
+
+

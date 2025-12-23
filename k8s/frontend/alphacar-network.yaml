@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: alphacar-routing
+  namespace: apc-fe-ns
+spec:
+  hosts:
+  - "alphacar.cloud"
+  gateways:
+  - istio-system/alphacar-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: frontend
+        port:
+          number: 8000  # <--- [수정 완료] 서비스가 열고 있는 진짜 포트

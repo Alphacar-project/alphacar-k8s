@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: monitoring-analysis-frontend
-  namespace: alphacar
+  namespace: apc-obsv-ns
   labels:
     app: monitoring-analysis-frontend
 spec:

@@ -20,7 +20,7 @@ spec:
         image: 192.168.0.169/alphacar-project/alphacar-community:1.0.0
         ports:
         - containerPort: 3005
-          name: http
+          name: http-community # Istio 인식용 포트 이름
         env:
         - name: PORT
           value: "3005"
@@ -42,22 +42,22 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MARIADB_PORT
-        # Secret (alphacar-be-secret) 참조 - Key 이름 매핑 주의
+        # Secret (alphacar-be-secret) 참조
         - name: MARIADB_USERNAME
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MARIADB_USER # secret 파일의 MARIADB_USER와 매핑
+              key: MARIADB_USER
         - name: MARIADB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MARIADB_PASS # secret 파일의 MARIADB_PASS와 매핑
+              key: MARIADB_PASS
         - name: MARIADB_DATABASE
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MARIADB_DB_NAME # secret 파일의 MARIADB_DB_NAME와 매핑
+              key: MARIADB_DB_NAME
         resources:
           requests:
             memory: "256Mi"
@@ -78,4 +78,5 @@ spec:
   - port: 3005
     targetPort: 3005
     protocol: TCP
+    name: http-community # Istio 프로토콜 분석용 접두사 추가
   type: ClusterIP

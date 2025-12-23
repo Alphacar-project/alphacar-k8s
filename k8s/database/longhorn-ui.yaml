@@ -1,55 +1,13 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: longhorn-ui
-  namespace: admin
-  labels:
-    app: longhorn-ui
-    component: monitoring
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: longhorn-ui
-  template:
-    metadata:
-      labels:
-        app: longhorn-ui
-        component: monitoring
-    spec:
-      containers:
-      - name: longhorn-ui
-        image: longhornio/longhorn-ui:v1.6.0
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: LONGHORN_MANAGER_IP
-          value: "http://longhorn-backend.apc-backup-ns.svc.cluster.local:9500"
-        ports:
-        - containerPort: 8000
-          name: http
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: longhorn-ui
-  namespace: admin
-  labels:
-    app: longhorn-ui
-    component: monitoring
-spec:
-  type: ClusterIP
-  ports:
-  - port: 80
-    targetPort: 8000
-    protocol: TCP
-    name: http
-  selector:
-    app: longhorn-ui
+# Longhorn UI는 Helm으로 설치된 Longhorn의 일부로 관리됩니다.
+# 이 파일은 참고용이며, 실제 배포는 Helm을 통해 이루어집니다.
+#
+# Longhorn UI 활성화:
+# helm upgrade longhorn longhorn/longhorn \
+#   --namespace apc-backup-ns \
+#   --version 1.10.1 \
+#   --set longhornUI.enabled=true \
+#   --set longhornUI.replicas=1 \
+#   --reuse-values
+#
+# Longhorn UI는 apc-backup-ns 네임스페이스에 배포됩니다.
 

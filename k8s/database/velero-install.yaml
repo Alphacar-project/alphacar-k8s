@@ -89,8 +89,8 @@ metadata:
 spec:
   provider: aws
   objectStorage:
-    bucket: velero-backups
-    prefix: apc-backup
+    bucket: mongodb-382045063773  # MongoDB 전용 버킷
+    prefix: backups               # 백업 파일 prefix
   config:
     region: us-east-1
     s3ForcePathStyle: "false"
@@ -118,6 +118,9 @@ spec:
     labelSelector:
       matchLabels:
         app: mongodb
+    # Longhorn 볼륨 백업을 위한 설정
+    snapshotVolumes: true
+    includeClusterResources: false
 ---
 apiVersion: velero.io/v1
 kind: Schedule

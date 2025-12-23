@@ -20,14 +20,14 @@ spec:
         image: 192.168.0.169/bh/alphacar-quote:1.0.0.85
         ports:
         - containerPort: 3003
-          name: http
+          name: http-quote # Istio 인식을 위한 포트 이름
         env:
         - name: PORT
           value: "3003"
         - name: SERVICE_NAME
           value: "quote-backend"
 
-        # [핵심] DB 호스트/포트 설정 (alphacar-be-config 참조)
+        # [ConfigMap] alphacar-be-config 참조
         - name: DATABASE_HOST
           valueFrom:
             configMapKeyRef:
@@ -49,7 +49,7 @@ spec:
               name: alphacar-be-config
               key: MONGO_PORT
 
-        # [핵심] DB 인증 및 보안 (alphacar-be-secret 참조)
+        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -86,9 +86,7 @@ spec:
               name: alphacar-be-secret
               key: JWT_SECRET
 
-        # [참고] MONGO_URI가 직접 필요한 경우를 위해 하드코딩된 변수 대신 위 값들을 소스에서 조합하거나 
-        # 필요한 경우 ConfigMap에 MONGO_URI 전체 경로를 추가하여 사용하세요.
-        # 일단 기존 변수명들에 매칭되는 값을 주입합니다.
+        # [참고] 기존 조합형 URI 유지
         - name: MONGO_URI
           value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
         - name: MONGODB_URI
@@ -116,4 +114,5 @@ spec:
   - port: 3003
     targetPort: 3003
     protocol: TCP
+    name: http-quote # Istio 프로토콜 분석용 접두사 추가
   type: ClusterIP

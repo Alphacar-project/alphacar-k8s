@@ -1,0 +1,116 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: alphacar-routing
+  namespace: apc-fe-ns
+spec:
+  gateways:
+  - istio-system/alphacar-gateway
+  hosts:
+  - alphacar.cloud
+  http:
+  # [1] Chat Backend (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/chat
+    route:
+    - destination:
+        host: aichat-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 4000
+
+  # [2] Quote Backend (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/vehicles
+    - uri:
+        prefix: /api/estimate
+    - uri:
+        prefix: /api/quote
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+
+  # [3] Community Backend (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/community
+    rewrite:
+      uri: /community
+    route:
+    - destination:
+        host: community-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3005
+
+  # [4] Search Backend (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/search
+    rewrite:
+      uri: /search
+    route:
+    - destination:
+        host: search-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3007
+
+  # [5] News Backend (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/news
+    rewrite:
+      uri: /news
+    route:
+    - destination:
+        host: news-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3008
+
+  # [6] MyPage Backend - Auth (기존 유지)
+  - match:
+    - uri:
+        prefix: /auth/
+    route:
+    - destination:
+        host: mypage-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3006
+          
+  # [7] MyPage Backend - API (기존 유지)
+  - match:
+    - uri:
+        prefix: /api/mypage
+    rewrite:
+      uri: /mypage
+    route:
+    - destination:
+        host: mypage-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3006
+
+  # [8] Main Backend (수정됨!)
+  # - 위치 변경: 다른 API(검색, 뉴스 등)를 가리지 않도록 API 리스트의 가장 아래로 내렸습니다.
+  # - 규칙 수정: 복잡한 Regex 대신 안전한 Prefix를 사용하여 /api/... -> /... 로 전달합니다.
+  - match:
+    - uri:
+        prefix: /api/
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+
+  # [9] Frontend (기존 유지)
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: frontend.apc-fe-ns.svc.cluster.local
+        port:
+          number: 8000

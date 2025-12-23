@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: monitoring-analysis-ingress
-  namespace: alphacar
+  namespace: apc-obsv-ns
   annotations:
     traefik.ingress.kubernetes.io/rule-type: PathPrefix
 spec:

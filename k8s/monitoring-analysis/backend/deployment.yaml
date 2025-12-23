@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: monitoring-analysis-backend
-  namespace: alphacar
+  namespace: apc-obsv-ns
   labels:
     app: monitoring-analysis-backend
 spec:
@@ -32,7 +32,7 @@ spec:
           const crypto = require('crypto');
           const { URL } = require('url');
           const port = process.env.PORT || 5000;
-          const prometheusUrl = process.env.PROMETHEUS_URL || 'http://prometheus.alphacar-obsv-ns.svc.cluster.local:9090';
+          const prometheusUrl = process.env.PROMETHEUS_URL || 'http://prometheus.apc-obsv-ns.svc.cluster.local:9090';
           const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
           const slackReportWebhookUrl = process.env.SLACK_REPORT_WEBHOOK_URL;
           const slackBotToken = process.env.SLACK_BOT_TOKEN;

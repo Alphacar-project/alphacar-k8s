@@ -2,13 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: monitoring-analysis-sa
-  namespace: alphacar
+  namespace: apc-obsv-ns
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: monitoring-analysis-role
-  namespace: alphacar
+  namespace: apc-obsv-ns
 rules:
 # Pod 로그 읽기 권한
 - apiGroups: [""]
@@ -19,11 +19,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: monitoring-analysis-rolebinding
-  namespace: alphacar
+  namespace: apc-obsv-ns
 subjects:
 - kind: ServiceAccount
   name: monitoring-analysis-sa
-  namespace: alphacar
+  namespace: apc-obsv-ns
 roleRef:
   kind: Role
   name: monitoring-analysis-role

@@ -19,8 +19,8 @@ spec:
       - name: drive-backend
         image: 192.168.0.169/alphacar-project/alphacar-drive:1.0.0
         ports:
-        - containerPort: 3004
-          name: http
+        - containerPort: 3008 # 환경변수 PORT와 일치시킴
+          name: http-news
         env:
         - name: PORT
           value: "3008"
@@ -75,8 +75,8 @@ spec:
   selector:
     app: news-backend
   ports:
-  - name: http-news
-    port: 3004
-    targetPort: 3004
+  - name: http-news # Istio 프로토콜 분석용 접두사
+    port: 3008      # VirtualService 설정과 맞춤
+    targetPort: 3008
     protocol: TCP
   type: ClusterIP

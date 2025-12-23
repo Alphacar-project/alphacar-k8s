@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: monitoring-analysis-daily-report
-  namespace: alphacar
+  namespace: apc-obsv-ns
 spec:
   schedule: "0 9 * * *"  # 매일 오전 9시 (출근 시간)
   successfulJobsHistoryLimit: 3

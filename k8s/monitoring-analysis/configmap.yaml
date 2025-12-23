@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: monitoring-analysis-config
-  namespace: alphacar
+  namespace: apc-obsv-ns
 data:
   # Prometheus 설정 (내부 Kubernetes 서비스)
   PROMETHEUS_URL: "http://prometheus.alphacar-obsv-ns.svc.cluster.local:9090"

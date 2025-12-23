@@ -20,13 +20,13 @@ spec:
         image: 192.168.0.169/bh/alphacar-search:1.0.1
         ports:
         - containerPort: 3007
-          name: http
+          name: http-search # 서비스 포트 이름과 통일
         env:
         - name: PORT
           value: "3007"
         - name: SERVICE_NAME
           value: "search-backend"
-        
+
         # [ConfigMap] alphacar-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:

@@ -17,19 +17,19 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        image: 192.168.0.169/bh/alphacar-frontend:1.0.6
+        image: 192.168.0.169/kdh/alphacar-frontend:2.0.4
         ports:
         - containerPort: 8000
           name: http
         env:
         - name: API_URL
-          value: "https://192.168.0.178/api"  # 멀티마스터: HAProxy IP
+          value: "https://alphacar.cloud/api"
         - name: PORT
           value: "8000"
         - name: NEXT_PUBLIC_BASE_URL
-          value: "https://192.168.0.178"  # 멀티마스터: HAProxy IP
+          value: "https://alphacar.cloud"
         - name: NEXT_PUBLIC_DOMAIN
-          value: "https://192.168.0.178"  # 멀티마스터: HAProxy IP
+          value: "https://alphacar.cloud"
         - name: NODE_EXTRA_CA_CERTS
           value: "/etc/ssl/certs/selfsigned.crt"
         volumeMounts:
@@ -39,11 +39,11 @@ spec:
           readOnly: true
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "300m"
+            memory: "128Mi"
+            cpu: "50m"
           limits:
-            memory: "1Gi"
-            cpu: "1000m"
+            memory: "500Mi"
+            cpu: "500m"
       volumes:
       - name: ssl-cert
         secret:

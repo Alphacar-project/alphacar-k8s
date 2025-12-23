@@ -6,7 +6,7 @@ echo "=========================================="
 echo "모니터링 분석 시스템 배포 시작"
 echo "=========================================="
 
-NAMESPACE="alphacar"
+NAMESPACE="apc-obsv-ns"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 네임스페이스 확인
@@ -61,11 +61,6 @@ else
   echo "⏭️  CronJob 건너뜀"
 fi
 
-# 7. k6 Job 템플릿 생성
-echo ""
-echo "6️⃣  k6 Job 템플릿 생성 중..."
-kubectl apply -f $SCRIPT_DIR/k6-loadtest-job.yaml
-echo "✅ k6 Job 템플릿 생성 완료"
 
 # 배포 상태 확인
 echo ""

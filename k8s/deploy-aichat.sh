@@ -5,7 +5,7 @@
 
 set -e
 
-NAMESPACE="alphacar"
+NAMESPACE="apc-be-ns"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "🚀 AI Chat 챗봇 Kubernetes 배포를 시작합니다..."

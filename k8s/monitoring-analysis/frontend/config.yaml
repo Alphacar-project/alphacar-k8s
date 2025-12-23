@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: monitoring-analysis-frontend-config
-  namespace: alphacar
+  namespace: apc-obsv-ns
 data:
   default.conf: |
     server {
