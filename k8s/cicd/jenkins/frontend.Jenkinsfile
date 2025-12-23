@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     parameters {
+        // 프론트엔드 빌드 실행 여부를 선택할 수 있는 파라미터
         choice(name: 'ACTION',
                choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
@@ -30,9 +31,12 @@ pipeline {
                 script {
                     def baseVer = "1.0"
                     try {
-                        baseVer = readFile('frontend/version.txt').trim()
+                        // frontend/version.txt가 있으면 읽어오고 없으면 기본값 사용
+                        if (fileExists('frontend/version.txt')) {
+                            baseVer = readFile('frontend/version.txt').trim()
+                        }
                     } catch (e) {
-                        echo "⚠️ version.txt 없음 → 1.0 사용"
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
@@ -72,10 +76,9 @@ pipeline {
                     def imageLatestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 
                     echo "🐳 이미지 빌드 시작..."
+                    // [해결] buildx 에러 방지를 위해 일반 docker build 사용
                     sh """
-                        export DOCKER_BUILDKIT=1
                         docker build \
-                            --progress=plain \
                             -f frontend/Dockerfile \
                             -t ${imageFullTag} \
                             -t ${imageLatestTag} \
