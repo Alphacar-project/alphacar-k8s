@@ -81,18 +81,18 @@ spec:
         - name: DATABASE_NAME
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: alphacar-aichat-secret
               key: MONGO_DB_NAME
         # AWS 인증 Secret (alphacar-be-secret) 참조
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: alphacar-aichat-secret
               key: AWS_ACCESS_KEY_ID
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: alphacar-aichat-secret
               key: AWS_SECRET_ACCESS_KEY
         volumeMounts:
         - name: vector-store

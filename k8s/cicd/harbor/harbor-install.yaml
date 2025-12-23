@@ -131,7 +131,7 @@ spec:
     spec:
       containers:
       - name: harbor
-        image: goharbor/harbor-core:latest
+        image: goharbor/harbor-core:v2.10.0
         ports:
         - containerPort: 8080
           name: http

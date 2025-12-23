@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: search-backend-config
+  namespace: apc-be-ns
+data:
+  ELASTICSEARCH_URL: "http://elasticsearch.apc-ek-ns.svc.cluster.local:9200"
+  ELASTICSEARCH_INDEX: "vehicles"
+---
+# 검색 백엔드 Deployment에 환경 변수 추가를 위한 패치 예시
+# 실제 Deployment에 env 섹션에 추가 필요:
+# env:
+#   - name: ELASTICSEARCH_URL
+#     valueFrom:
+#       configMapKeyRef:
+#         name: search-backend-config
+#         key: ELASTICSEARCH_URL
+

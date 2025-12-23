@@ -100,3 +100,4 @@ echo "[SUCCESS] PNG 파일 정리 완료!"
 echo "[INFO] 총 발견: $TOTAL_PNG 개"
 echo "[INFO] 총 삭제: $TOTAL_DELETED 개"
 
+

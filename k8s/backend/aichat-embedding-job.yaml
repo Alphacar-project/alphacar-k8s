@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: aichat-embedding-job
-  namespace: apc-ai-ns
+  namespace: apc-be-ns
 spec:
   ttlSecondsAfterFinished: 3600  # Job 완료 후 1시간 후 자동 삭제
   backoffLimit: 3  # 최대 3번 재시도

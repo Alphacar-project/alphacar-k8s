@@ -1,13 +1,1 @@
-# Longhorn UI는 Helm으로 설치된 Longhorn의 일부로 관리됩니다.
-# 이 파일은 참고용이며, 실제 배포는 Helm을 통해 이루어집니다.
-#
-# Longhorn UI 활성화:
-# helm upgrade longhorn longhorn/longhorn \
-#   --namespace apc-backup-ns \
-#   --version 1.10.1 \
-#   --set longhornUI.enabled=true \
-#   --set longhornUI.replicas=1 \
-#   --reuse-values
-#
-# Longhorn UI는 apc-backup-ns 네임스페이스에 배포됩니다.
 

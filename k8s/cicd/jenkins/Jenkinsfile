@@ -2,23 +2,20 @@ pipeline {
     agent any
 
     parameters {
+        // [복구] 빌드할 서비스를 선택할 수 있는 파라미터
         choice(name: 'SERVICE_NAME', 
                choices: ['all', 'aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search'], 
-               description: '빌드할 백엔드 서비스를 선택하세요')
-        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전 (빌드 번호가 자동으로 붙습니다)')
+               description: '빌드 및 검사할 서비스를 선택하세요. (기본값: all)')
+        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
     }
 
     environment {
-        // [수정] 서버 환경 변수 반영
         HARBOR_URL = '192.168.0.170:30000'
         HARBOR_PROJECT = 'alphacar'
         DOCKER_CREDENTIAL_ID = 'harbor-cred'
         GIT_CREDENTIAL_ID = 'github-cred'
-        
-        SONARQUBE_NAME = 'SonarQube' // Jenkins System 설정에 등록된 이름
+        SONARQUBE_NAME = 'SonarQube'
         SONAR_URL = 'http://192.168.0.170:32000'
-        
-        // GitOps 저장소 설정
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
     }
 
@@ -31,12 +28,13 @@ pipeline {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${params.VERSION}.${currentBuild.number}-${env.GIT_SHA}"
                     
+                    // 빌드 대상 목록 설정
                     if (params.SERVICE_NAME == 'all') {
-                        env.SERVICES = 'aichat community main mypage news quote search'
+                        env.SERVICES_LIST = 'aichat community main mypage news quote search'
                     } else {
-                        env.SERVICES = params.SERVICE_NAME
+                        env.SERVICES_LIST = params.SERVICE_NAME
                     }
-                    echo "🚀 대상 서비스: ${env.SERVICES} / 버전: ${env.FULL_VERSION}"
+                    echo "🚀 대상 서비스: ${env.SERVICES_LIST}"
                 }
             }
         }
@@ -44,19 +42,21 @@ pipeline {
         stage('2. SonarQube Analysis') {
             steps {
                 script {
-                    // [해결] 이전에 발생한 sonar-scanner 경로 문제 수정
                     def scannerHome = tool name: 'sonar-scanner'
+                    def services = env.SERVICES_LIST.split(' ')
                     
-                    dir('dev/alphacar') {
-                        withSonarQubeEnv("${env.SONARQUBE_NAME}") {
-                            // Kotlin 제외 및 리소스 절약을 위한 설정 추가
+                    withSonarQubeEnv("${env.SONARQUBE_NAME}") {
+                        for (service in services) {
+                            echo "🔍 [${service}] 소나큐브 분석 시작..."
+                            // [최적화] 전체가 아닌 선택된 서비스 폴더만 정밀 검사하여 시간 단축
                             sh """
                                 ${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.projectKey=alphacar-backend \
-                                -Dsonar.sources=backend \
+                                -Dsonar.projectKey=alphacar-${service} \
+                                -Dsonar.projectName=alphacar-${service} \
+                                -Dsonar.sources=dev/alphacar/backend/${service} \
                                 -Dsonar.host.url=${env.SONAR_URL} \
                                 -Dsonar.language=java \
-                                -Dsonar.exclusions=**/*.kotlin,**/*.kt \
+                                -Dsonar.exclusions=**/*.kotlin,**/*.kt,**/test/** \
                                 -Dsonar.scanner.timeout=300
                             """
                         }
@@ -65,11 +65,11 @@ pipeline {
             }
         }
 
-        stage('3. 병렬 빌드 & 푸시 (리소스 관리)') {
+        stage('3. 병렬 빌드 & 푸시 (Batch)') {
             steps {
                 script {
-                    def serviceList = env.SERVICES.split(' ')
-                    // 리소스 소모를 줄이기 위해 한 번에 2개씩만 처리 (기존 all 병렬 처리의 과부하 방지)
+                    def serviceList = env.SERVICES_LIST.split(' ')
+                    // 리소스 보호를 위해 2개씩 순차 병렬 처리
                     for (int i = 0; i < serviceList.size(); i += 2) {
                         def batch = serviceList[i..(Math.min(i + 1, serviceList.size() - 1))]
                         def actions = [:]
@@ -78,8 +78,6 @@ pipeline {
                             actions["Build-${service}"] = {
                                 stage("Process ${service}") {
                                     dir('dev/alphacar') {
-                                        echo "📦 [${service}] 빌드 시작..."
-                                        // [수정] 도커 빌드 시 backend/ 폴더를 컨텍스트로 사용
                                         sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION} -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest backend/"
 
                                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -97,7 +95,7 @@ pipeline {
             }
         }
 
-        stage('4. Update Manifests (GitOps)') {
+        stage('4. Update Manifests & GitOps') {
             steps {
                 script {
                     dir('manifest-update') {
@@ -106,15 +104,12 @@ pipeline {
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
 
-                        def serviceList = env.SERVICES.split(' ')
+                        def serviceList = env.SERVICES_LIST.split(' ')
                         for (service in serviceList) {
                             def yamlPath = "k8s/backend/${service}-backend.yaml"
                             sh """
                                 if [ -f "${yamlPath}" ]; then
-                                    echo "📝 [${service}] 태그 업데이트 중..."
                                     sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' ${yamlPath}
-                                else
-                                    echo "⚠️ 파일 없음: ${yamlPath}"
                                 fi
                             """
                         }
@@ -126,8 +121,6 @@ pipeline {
                             if [ -n "\$(git status --porcelain)" ]; then
                                 git commit -m "Update images to ${env.FULL_VERSION} [skip ci]"
                                 git push origin main
-                            else
-                                echo "✅ 변경사항 없음"
                             fi
                         """
                     }

@@ -4,6 +4,7 @@ metadata:
   name: monitoring-analysis-daily-report
   namespace: apc-obsv-ns
 spec:
+  timeZone: "Asia/Seoul" # 타임존 추가로 한국시간으로 변환
   schedule: "0 9 * * *"  # 매일 오전 9시 (출근 시간)
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1

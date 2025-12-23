@@ -13,7 +13,6 @@ spec:
       labels:
         app: sonarqube
     spec:
-      # nodeName: a-worker1  # [추가] 건강한 노드인 a-worker1에 강제 배치
       containers:
       - name: sonarqube
         image: sonarqube:lts-community
@@ -22,18 +21,19 @@ spec:
         env:
         - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
           value: "true"
+        # 전체 2Gi(2048MB) 중 핵심 프로세스에 효율적으로 배분
         - name: SONAR_WEB_JAVAOPTS
-          value: "-Xmx512m -Xms512m"
+          value: "-Xmx768m -Xms768m"
         - name: SONAR_CE_JAVAOPTS
           value: "-Xmx512m -Xms512m"
         - name: SONAR_ES_JAVAOPTS
           value: "-Xmx512m -Xms512m"
         resources:
           requests:
-            memory: "1Gi"
+            memory: "1.5Gi"   # 최소 예약량을 조금 더 높여 안정성 확보
             cpu: "500m"
           limits:
-            memory: "2Gi"
+            memory: "2Gi"     # 요청하신 대로 2Gi 유지
             cpu: "1000m"
 ---
 apiVersion: v1
@@ -44,8 +44,8 @@ metadata:
 spec:
   type: NodePort
   ports:
-  - port: 32000
+  - port: 9000         # 내부 포트 (9000이 표준입니다)
     targetPort: 9000
-    nodePort: 32000  # 시방서 정의 포트
+    nodePort: 32000    # 외부 접속 포트
   selector:
     app: sonarqube

@@ -8,11 +8,14 @@ spec:
   - istio-system/alphacar-gateway
   hosts:
   - alphacar.cloud
+  - www.alphacar.cloud
   http:
   # [1] Chat Backend (기존 유지)
   - match:
     - uri:
         prefix: /api/chat
+    rewrite:
+      uri: /chat      
     route:
     - destination:
         host: aichat-backend.apc-be-ns.svc.cluster.local
@@ -90,6 +93,31 @@ spec:
         host: mypage-backend.apc-be-ns.svc.cluster.local
         port:
           number: 3006
+  # [추가됨] Monitoring Frontend
+  - match:
+    - uri:
+        prefix: /monitoring
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: monitoring-analysis-frontend.apc-obsv-ns.svc.cluster.local
+        port:
+          number: 80
+
+  # [추가됨] Monitoring Backend - API
+  - match:
+    - uri:
+        prefix: /api/k8s
+    - uri:
+        prefix: /api/analyze
+    - uri:
+        prefix: /api/solution
+    route:
+    - destination:
+        host: monitoring-analysis-backend.apc-obsv-ns.svc.cluster.local
+        port:
+          number: 5000
 
   # [8] Main Backend (수정됨!)
   # - 위치 변경: 다른 API(검색, 뉴스 등)를 가리지 않도록 API 리스트의 가장 아래로 내렸습니다.

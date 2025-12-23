@@ -1,201 +1,465 @@
 apiVersion: v1
 data:
-  migrate.py: "import os\nimport sys\nimport pymongo\nimport requests\nimport boto3\nfrom
-    urllib.parse import urlparse\nfrom pathlib import Path\nimport hashlib\n\n# 설정\nMONGODB_URI
-    = os.environ.get('MONGODB_URI')\nMONGODB_DB = os.environ.get('MONGODB_DB', 'triple_db')\nS3_BUCKET
-    = os.environ.get('S3_BUCKET')\nS3_PREFIX = os.environ.get('S3_PREFIX', 'images')\nAWS_REGION
-    = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')\n\nprint(f\"연결 중: {MONGODB_URI.split('@')[1]
-    if '@' in MONGODB_URI else MONGODB_URI}\")\n\n# MongoDB 연결\ntry:\n    client =
-    pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)\n    db = client[MONGODB_DB]\n
-    \   # 연결 테스트\n    client.admin.command('ping')\n    print(\"✅ MongoDB 연결 성공\")\nexcept
-    Exception as e:\n    print(f\"❌ MongoDB 연결 실패: {e}\")\n    sys.exit(1)\n\n# S3
-    클라이언트\ns3_client = boto3.client('s3', region_name=AWS_REGION)\n\n# danawa_vehicle_data
-    컬렉션만 처리\ncollection_name = 'danawa_vehicle_data'\n\nif collection_name not in
-    db.list_collection_names():\n    print(f\"❌ 컬렉션을 찾을 수 없습니다: {collection_name}\")\n
-    \   sys.exit(1)\n\nprint(f\"\\n처리 대상 컬렉션: {collection_name}\")\n\n# 이미지 필드 정의
-    (danawa_vehicle_data 실제 구조)\nimage_field_mapping = {\n    'basic': ['main_image',
-    'image_url', 'imageUrl', 'image', 'img_url', 'photo_url', 'photoUrl', 'car_image',
-    'vehicle_image', 'thumbnail'],\n    'exterior': ['exterior_images'],  # 배열 필드\n
-    \   'interior': ['interior_images'],   # 배열 필드\n    'color': ['color_images']
-    \        # 배열 필드\n}\n\ndef is_s3_url(url):\n    \"\"\"이미 S3 URL인지 확인\"\"\"\n    if
-    not isinstance(url, str):\n        return False\n    # S3 URL 패턴 확인: s3.amazonaws.com
-    또는 이미 업로드된 S3 URL\n    return ('s3.amazonaws.com' in url or 's3.' in url) and
-    S3_BUCKET in url\n\ndef sanitize_filename(name):\n    \"\"\"파일명으로 사용 가능하도록 문자열
-    정리\"\"\"\n    import re\n    if not name:\n        return \"unknown\"\n    # 한글,
-    영문, 숫자, 공백만 허용하고 나머지는 언더스코어로\n    name = re.sub(r'[^\\w\\s가-힣]', '_', str(name))\n
-    \   # 공백을 언더스코어로\n    name = re.sub(r'\\s+', '_', name)\n    # 연속된 언더스코어를 하나로\n
-    \   name = re.sub(r'_+', '_', name)\n    # 길이 제한 (50자)\n    return name[:50].strip('_')\n\ndef
-    download_and_upload_image(image_url, collection_name, doc_id, image_type='basic',
-    vehicle_name=None, color_name=None):\n    \"\"\"이미지를 다운로드하여 S3에 업로드하고 URL 반환\"\"\"\n
-    \   try:\n        # 이미지 파일명 생성\n        parsed_url = urlparse(image_url)\n        file_ext
-    = Path(parsed_url.path).suffix or '.jpg'\n        if not file_ext.startswith('.'):\n
-    \           file_ext = '.jpg'\n        file_hash = hashlib.md5(image_url.encode()).hexdigest()[:8]\n
-    \       \n        # S3 경로 구성: images/{collection}/{doc_id}/{vehicle_name}/{type}/{color_name}/{hash}.{ext}\n
-    \       path_parts = [S3_PREFIX, collection_name, str(doc_id)]\n        \n        #
-    차량명 추가 (있는 경우)\n        if vehicle_name:\n            path_parts.append(sanitize_filename(vehicle_name))\n
-    \       \n        # 타입 추가\n        path_parts.append(image_type)\n        \n        #
-    색상명 추가 (색상 이미지인 경우)\n        if image_type.startswith('color') and color_name:\n
-    \           path_parts.append(sanitize_filename(color_name))\n        \n        #
-    해시와 확장자 추가\n        path_parts.append(f\"{file_hash}{file_ext}\")\n        \n
-    \       s3_key = \"/\".join(path_parts)\n        \n        # 이미지 다운로드\n        response
-    = requests.get(image_url, timeout=30, stream=True)\n        response.raise_for_status()\n
-    \       \n        # S3에 업로드\n        s3_client.upload_fileobj(\n            response.raw,\n
-    \           S3_BUCKET,\n            s3_key,\n            ExtraArgs={'ContentType':
-    response.headers.get('Content-Type', 'image/jpeg')}\n        )\n        \n        #
-    S3 URL 생성\n        s3_url = f\"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}\"\n
-    \       return s3_url\n    except Exception as e:\n        print(f\"    ⚠️  이미지
-    업로드 실패 ({image_url[:50]}...): {str(e)[:50]}\")\n        return None\n\ncollection
-    = db[collection_name]\ntotal = collection.count_documents({})\n\nif total == 0:\n
-    \   print(f\"❌ 컬렉션에 문서가 없습니다: {collection_name}\")\n    sys.exit(0)\n\nprint(f\"\\n컬렉션:
-    {collection_name} (총 {total}개 문서)\")\n\n# 샘플 문서 구조 확인 (첫 번째 문서)\nsample_doc =
-    collection.find_one({})\nif sample_doc:\n    print(f\"\\n[디버깅] 샘플 문서 필드명:\")\n
-    \   for key in sorted(sample_doc.keys()):\n        if key != '_id':\n            value
-    = sample_doc[key]\n            if isinstance(value, str) and (value.startswith('http://')
-    or value.startswith('https://')):\n                is_s3 = is_s3_url(value)\n
-    \               print(f\"  - {key}: {value[:50]}... ({'S3 URL' if is_s3 else '외부
-    URL'})\")\n            elif isinstance(value, list) and len(value) > 0:\n                print(f\"
-    \ - {key}: [배열, {len(value)}개 항목]\")\n                # 배열의 첫 번째 항목 확인\n                if
-    len(value) > 0:\n                    first_item = value[0]\n                    if
-    isinstance(first_item, str) and (first_item.startswith('http://') or first_item.startswith('https://')):\n
-    \                       is_s3 = is_s3_url(first_item)\n                        print(f\"
-    \   첫 항목: {first_item[:50]}... ({'S3 URL' if is_s3 else '외부 URL'})\")\n                    elif
-    isinstance(first_item, dict):\n                        print(f\"    첫 항목: {type(first_item).__name__}
-    객체\")\n                        if 'image' in first_item:\n                            img_val
-    = first_item['image']\n                            if isinstance(img_val, str)
-    and (img_val.startswith('http://') or img_val.startswith('https://')):\n                                is_s3
-    = is_s3_url(img_val)\n                                print(f\"      image 필드:
-    {img_val[:50]}... ({'S3 URL' if is_s3 else '외부 URL'})\")\n            else:\n
-    \               print(f\"  - {key}: {type(value).__name__}\")\n\nprocessed = 0\nupdated
-    = 0\nimages_uploaded = 0\n\nfor doc in collection.find({}):\n    processed +=
-    1\n    doc_id = doc.get('_id')\n    update_fields = {}\n    has_updates = False\n
-    \   \n    # 차량 정보 추출 (메타데이터용)\n    vehicle_name = doc.get('vehicle_name') or doc.get('name')
-    or doc.get('model_name') or doc.get('car_name') or None\n    vehicle_brand = doc.get('brand')
-    or doc.get('manufacturer') or None\n    \n    # 이미지 메타데이터 저장용\n    images_metadata
-    = []\n    \n    # 1. 기본 이미지 처리\n    for field in image_field_mapping['basic']:\n
-    \       if field in doc and doc[field]:\n            value = doc[field]\n            if
-    isinstance(value, str) and (value.startswith('http://') or value.startswith('https://')):\n
-    \               if is_s3_url(value):\n                    # 이미 S3 URL이면 메타데이터만
-    추가\n                    images_metadata.append({\n                        'url':
-    value,\n                        'type': 'basic',\n                        'field':
-    field,\n                        'vehicle_name': vehicle_name,\n                        'vehicle_brand':
-    vehicle_brand\n                    })\n                    continue\n                s3_url
-    = download_and_upload_image(value, collection_name, str(doc_id), 'basic', vehicle_name)\n
-    \               if s3_url:\n                    update_fields[field] = s3_url\n
-    \                   images_metadata.append({\n                        'url': s3_url,\n
-    \                       'type': 'basic',\n                        'field': field,\n
-    \                       'vehicle_name': vehicle_name,\n                        'vehicle_brand':
-    vehicle_brand\n                    })\n                    has_updates = True\n
-    \                   images_uploaded += 1\n                break  # 기본 이미지는 하나만
-    처리\n    \n    # 2. 외관 이미지 처리 (배열)\n    for field in image_field_mapping['exterior']:\n
-    \       if field in doc and doc[field]:\n            value = doc[field]\n            if
-    isinstance(value, list):\n                updated_exterior = []\n                for
-    idx, img_item in enumerate(value):\n                    img_url = None\n                    #
-    배열 항목이 문자열인지 딕셔너리인지 확인\n                    if isinstance(img_item, str) and (img_item.startswith('http://')
-    or img_item.startswith('https://')):\n                        img_url = img_item\n
-    \                   elif isinstance(img_item, dict):\n                        #
-    딕셔너리에서 image 필드 찾기\n                        img_url = img_item.get('image') or
-    img_item.get('url') or img_item.get('image_url')\n                    \n                    if
-    img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):\n
-    \                       if is_s3_url(img_url):\n                            #
-    이미 S3 URL이면 메타데이터만 추가하고 원본 유지\n                            updated_exterior.append(img_item)\n
-    \                           images_metadata.append({\n                                'url':
-    img_url,\n                                'type': 'exterior',\n                                'field':
-    field,\n                                'index': idx,\n                                'vehicle_name':
-    vehicle_name,\n                                'vehicle_brand': vehicle_brand\n
-    \                           })\n                            continue\n                        #
-    외부 URL이면 업로드\n                        s3_url = download_and_upload_image(img_url,
-    collection_name, str(doc_id), f'exterior_{idx}', vehicle_name)\n                        if
-    s3_url:\n                            if isinstance(img_item, dict):\n                                #
-    딕셔너리면 image 필드 업데이트\n                                new_item = img_item.copy()\n
-    \                               new_item['image'] = s3_url\n                                updated_exterior.append(new_item)\n
-    \                           else:\n                                # 문자열이면 S3
-    URL로 교체\n                                updated_exterior.append(s3_url)\n                            images_metadata.append({\n
-    \                               'url': s3_url,\n                                'type':
-    'exterior',\n                                'field': field,\n                                'index':
-    idx,\n                                'vehicle_name': vehicle_name,\n                                'vehicle_brand':
-    vehicle_brand\n                            })\n                            has_updates
-    = True\n                            images_uploaded += 1\n                        else:\n
-    \                           updated_exterior.append(img_item)  # 실패해도 원본 유지\n
-    \                   else:\n                        updated_exterior.append(img_item)
-    \ # URL이 아니면 원본 유지\n                \n                if updated_exterior != value:\n
-    \                   update_fields[field] = updated_exterior\n                    has_updates
-    = True\n                break  # 첫 번째 매칭 필드만 처리\n    \n    # 3. 내관 이미지 처리 (배열)\n
-    \   for field in image_field_mapping['interior']:\n        if field in doc and
-    doc[field]:\n            value = doc[field]\n            if isinstance(value,
-    list):\n                updated_interior = []\n                for idx, img_item
-    in enumerate(value):\n                    img_url = None\n                    #
-    배열 항목이 문자열인지 딕셔너리인지 확인\n                    if isinstance(img_item, str) and (img_item.startswith('http://')
-    or img_item.startswith('https://')):\n                        img_url = img_item\n
-    \                   elif isinstance(img_item, dict):\n                        #
-    딕셔너리에서 image 필드 찾기\n                        img_url = img_item.get('image') or
-    img_item.get('url') or img_item.get('image_url')\n                    \n                    if
-    img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):\n
-    \                       if is_s3_url(img_url):\n                            #
-    이미 S3 URL이면 메타데이터만 추가하고 원본 유지\n                            updated_interior.append(img_item)\n
-    \                           images_metadata.append({\n                                'url':
-    img_url,\n                                'type': 'interior',\n                                'field':
-    field,\n                                'index': idx,\n                                'vehicle_name':
-    vehicle_name,\n                                'vehicle_brand': vehicle_brand\n
-    \                           })\n                            continue\n                        #
-    외부 URL이면 업로드\n                        s3_url = download_and_upload_image(img_url,
-    collection_name, str(doc_id), f'interior_{idx}', vehicle_name)\n                        if
-    s3_url:\n                            if isinstance(img_item, dict):\n                                #
-    딕셔너리면 image 필드 업데이트\n                                new_item = img_item.copy()\n
-    \                               new_item['image'] = s3_url\n                                updated_interior.append(new_item)\n
-    \                           else:\n                                # 문자열이면 S3
-    URL로 교체\n                                updated_interior.append(s3_url)\n                            images_metadata.append({\n
-    \                               'url': s3_url,\n                                'type':
-    'interior',\n                                'field': field,\n                                'index':
-    idx,\n                                'vehicle_name': vehicle_name,\n                                'vehicle_brand':
-    vehicle_brand\n                            })\n                            has_updates
-    = True\n                            images_uploaded += 1\n                        else:\n
-    \                           updated_interior.append(img_item)  # 실패해도 원본 유지\n
-    \                   else:\n                        updated_interior.append(img_item)
-    \ # URL이 아니면 원본 유지\n                \n                if updated_interior != value:\n
-    \                   update_fields[field] = updated_interior\n                    has_updates
-    = True\n                break  # 첫 번째 매칭 필드만 처리\n    \n    # 4. 색상별 이미지 처리 (배열)\n
-    \   for field in image_field_mapping['color']:\n        if field in doc and doc[field]:\n
-    \           value = doc[field]\n            if isinstance(value, list):\n                updated_colors
-    = []\n                for idx, color_item in enumerate(value):\n                    color_name
-    = None\n                    if isinstance(color_item, dict):\n                        #
-    colors 배열 내 객체 (예: {name: \"red\", image: \"url\"})\n                        color_name
-    = color_item.get('name') or color_item.get('color_name') or color_item.get('color')
-    or f'color_{idx}'\n                        if 'image' in color_item and color_item['image']:\n
-    \                           img_url = color_item['image']\n                            if
-    isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):\n
-    \                               if is_s3_url(img_url):\n                                    updated_colors.append(color_item)\n
-    \                                   continue\n                                s3_url
-    = download_and_upload_image(img_url, collection_name, str(doc_id), f'color_{idx}',
-    vehicle_name, color_name)\n                                if s3_url:\n                                    color_item
-    = color_item.copy()\n                                    color_item['image'] =
-    s3_url\n                                    images_metadata.append({\n                                        'url':
-    s3_url,\n                                        'type': 'color',\n                                        'color_name':
-    color_name,\n                                        'color_index': idx,\n                                        'vehicle_name':
-    vehicle_name,\n                                        'vehicle_brand': vehicle_brand\n
-    \                                   })\n                                    images_uploaded
-    += 1\n                    elif isinstance(color_item, str):\n                        #
-    문자열 배열 (예: [\"url1\", \"url2\"])\n                        color_name = f'color_{idx}'\n
-    \                       if color_item.startswith('http://') or color_item.startswith('https://'):\n
-    \                           if is_s3_url(color_item):\n                                updated_colors.append(color_item)\n
-    \                               continue\n                            s3_url =
-    download_and_upload_image(color_item, collection_name, str(doc_id), f'color_{idx}',
-    vehicle_name, color_name)\n                            if s3_url:\n                                color_item
-    = s3_url\n                                images_metadata.append({\n                                    'url':
-    s3_url,\n                                    'type': 'color',\n                                    'color_name':
-    color_name,\n                                    'color_index': idx,\n                                    'vehicle_name':
-    vehicle_name,\n                                    'vehicle_brand': vehicle_brand\n
-    \                               })\n                                images_uploaded
-    += 1\n                            else:\n                                updated_colors.append(color_item)
-    \ # 실패해도 원본 유지\n                                continue\n                    updated_colors.append(color_item)\n
-    \               \n                if updated_colors != value:\n                    update_fields[field]
-    = updated_colors\n                    has_updates = True\n    \n    # MongoDB
-    업데이트\n    if has_updates:\n        # 이미지 메타데이터도 함께 저장\n        update_fields['s3_images_metadata']
-    = images_metadata\n        collection.update_one(\n            {'_id': doc_id},\n
-    \           {'$set': update_fields}\n        )\n        updated += 1\n        print(f\"
-    \ [{processed}/{total}] ✅ 업데이트: {doc_id} ({len(update_fields)-1}개 필드, {len(images_metadata)}개
-    이미지 메타데이터)\")\n\nprint(f\"\\n완료: {processed}개 문서 처리, {updated}개 문서 업데이트, {images_uploaded}개
-    이미지 업로드\")\n\nprint(f\"\\n=== 전체 완료 ===\")\nprint(f\"총 처리: {processed}개 문서\")\nprint(f\"총
-    업데이트: {updated}개 문서\")\nprint(f\"총 이미지 업로드: {images_uploaded}개\")"
+  migrate.py: |
+    import os
+    import sys
+    import pymongo
+    import requests
+    import boto3
+    from urllib.parse import urlparse
+    from pathlib import Path
+    import hashlib
+    
+    # 설정
+    MONGODB_URI = os.environ.get('MONGODB_URI')
+    MONGODB_DB = os.environ.get('MONGODB_DB', 'triple_db')
+    S3_BUCKET = os.environ.get('S3_BUCKET')
+    S3_PREFIX = os.environ.get('S3_PREFIX', 'images')
+    AWS_REGION = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+    
+    print(f"연결 중: {MONGODB_URI.split('@')[1] if '@' in MONGODB_URI else MONGODB_URI}")
+    
+    # MongoDB 연결
+    try:
+        client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        db = client[MONGODB_DB]
+        # 연결 테스트
+        client.admin.command('ping')
+        print("✅ MongoDB 연결 성공")
+    except Exception as e:
+        print(f"❌ MongoDB 연결 실패: {e}")
+        sys.exit(1)
+    
+    # S3 클라이언트
+    s3_client = boto3.client('s3', region_name=AWS_REGION)
+    
+    # danawa_vehicle_data 컬렉션만 처리
+    collection_name = 'danawa_vehicle_data'
+    
+    if collection_name not in db.list_collection_names():
+        print(f"❌ 컬렉션을 찾을 수 없습니다: {collection_name}")
+        sys.exit(1)
+    
+    print(f"\n처리 대상 컬렉션: {collection_name}")
+    
+    # 이미지 필드 정의 (danawa_vehicle_data 실제 구조)
+    image_field_mapping = {
+        'basic': ['main_image', 'image_url', 'imageUrl', 'image', 'img_url', 'photo_url', 'photoUrl', 'car_image', 'vehicle_image', 'thumbnail'],
+        'exterior': ['exterior_images'],  # 배열 필드
+        'interior': ['interior_images'],   # 배열 필드
+        'color': ['color_images']         # 배열 필드
+    }
+    
+    def is_s3_url(url):
+        """이미 S3 URL인지 확인"""
+        if not isinstance(url, str):
+            return False
+        # S3 URL 패턴 확인: s3.amazonaws.com 또는 이미 업로드된 S3 URL
+        return ('s3.amazonaws.com' in url or 's3.' in url) and S3_BUCKET in url
+    
+    def sanitize_filename(name):
+        """파일명으로 사용 가능하도록 문자열 정리"""
+        import re
+        if not name:
+            return "unknown"
+        # 한글, 영문, 숫자, 공백만 허용하고 나머지는 언더스코어로
+        name = re.sub(r'[^\w\s가-힣]', '_', str(name))
+        # 공백을 언더스코어로
+        name = re.sub(r'\s+', '_', name)
+        # 연속된 언더스코어를 하나로
+        name = re.sub(r'_+', '_', name)
+        # 길이 제한 (50자)
+        return name[:50].strip('_')
+    
+    def download_and_upload_image(image_url, collection_name, doc_id, image_type='basic', vehicle_name=None, color_name=None):
+        """이미지를 다운로드하여 S3에 업로드하고 URL 반환"""
+        try:
+            # 이미지 파일명 생성
+            parsed_url = urlparse(image_url)
+            file_ext = Path(parsed_url.path).suffix or '.jpg'
+            if not file_ext.startswith('.'):
+                file_ext = '.jpg'
+            file_hash = hashlib.md5(image_url.encode()).hexdigest()[:8]
+            
+            # S3 경로 구성: images/{collection}/{doc_id}/{vehicle_name}/{type}/{color_name}/{hash}.{ext}
+            path_parts = [S3_PREFIX, collection_name, str(doc_id)]
+            
+            # 차량명 추가 (있는 경우)
+            if vehicle_name:
+                path_parts.append(sanitize_filename(vehicle_name))
+            
+            # 타입 추가
+            path_parts.append(image_type)
+            
+            # 색상명 추가 (색상 이미지인 경우)
+            if image_type.startswith('color') and color_name:
+                path_parts.append(sanitize_filename(color_name))
+            
+            # 해시와 확장자 추가
+            path_parts.append(f"{file_hash}{file_ext}")
+            
+            s3_key = "/".join(path_parts)
+            
+            # 이미지 다운로드
+            response = requests.get(image_url, timeout=30, stream=True)
+            response.raise_for_status()
+            
+            # S3에 업로드
+            s3_client.upload_fileobj(
+                response.raw,
+                S3_BUCKET,
+                s3_key,
+                ExtraArgs={'ContentType': response.headers.get('Content-Type', 'image/jpeg')}
+            )
+            
+            # S3 URL 생성
+            s3_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+            return s3_url
+        except Exception as e:
+            print(f"    ⚠️  이미지 업로드 실패 ({image_url[:50]}...): {str(e)[:50]}")
+            return None
+    
+    collection = db[collection_name]
+    total = collection.count_documents({})
+    
+    if total == 0:
+        print(f"❌ 컬렉션에 문서가 없습니다: {collection_name}")
+        sys.exit(0)
+    
+    print(f"\n컬렉션: {collection_name} (총 {total}개 문서)")
+    
+    # 샘플 문서 구조 확인 (첫 번째 문서)
+    sample_doc = collection.find_one({})
+    if sample_doc:
+        print(f"\n[디버깅] 샘플 문서 필드명:")
+        for key in sorted(sample_doc.keys()):
+            if key != '_id':
+                value = sample_doc[key]
+                if isinstance(value, str) and (value.startswith('http://') or value.startswith('https://')):
+                    is_s3 = is_s3_url(value)
+                    print(f"  - {key}: {value[:50]}... ({'S3 URL' if is_s3 else '외부 URL'})")
+                elif isinstance(value, list) and len(value) > 0:
+                    print(f"  - {key}: [배열, {len(value)}개 항목]")
+                    # 배열의 첫 번째 항목 확인
+                    if len(value) > 0:
+                        first_item = value[0]
+                        if isinstance(first_item, str) and (first_item.startswith('http://') or first_item.startswith('https://')):
+                            is_s3 = is_s3_url(first_item)
+                            print(f"    첫 항목: {first_item[:50]}... ({'S3 URL' if is_s3 else '외부 URL'})")
+                        elif isinstance(first_item, dict):
+                            print(f"    첫 항목: {type(first_item).__name__} 객체")
+                            if 'image' in first_item:
+                                img_val = first_item['image']
+                                if isinstance(img_val, str) and (img_val.startswith('http://') or img_val.startswith('https://')):
+                                    is_s3 = is_s3_url(img_val)
+                                    print(f"      image 필드: {img_val[:50]}... ({'S3 URL' if is_s3 else '외부 URL'})")
+                else:
+                    print(f"  - {key}: {type(value).__name__}")
+    
+    processed = 0
+    updated = 0
+    images_uploaded = 0
+    
+    for doc in collection.find({}):
+        processed += 1
+        doc_id = doc.get('_id')
+        update_fields = {}
+        has_updates = False
+        
+        # 차량 정보 추출 (메타데이터용)
+        vehicle_name = doc.get('vehicle_name') or doc.get('name') or doc.get('model_name') or doc.get('car_name') or None
+        vehicle_brand = doc.get('brand') or doc.get('manufacturer') or None
+        
+        # 이미지 메타데이터 저장용
+        images_metadata = []
+        
+        # 1. 기본 이미지 처리
+        for field in image_field_mapping['basic']:
+            if field in doc and doc[field]:
+                value = doc[field]
+                if isinstance(value, str) and (value.startswith('http://') or value.startswith('https://')):
+                    if is_s3_url(value):
+                        # 이미 S3 URL이면 메타데이터만 추가 (원본 유지)
+                        images_metadata.append({
+                            'url': value,
+                            'type': 'basic',
+                            'field': field,
+                            'vehicle_name': vehicle_name,
+                            'vehicle_brand': vehicle_brand,
+                            'original_url': value  # 원본 URL도 메타데이터에 저장
+                        })
+                        continue
+                    # 원본 URL 보존하면서 S3 URL 추가
+                    original_url = value
+                    s3_url = download_and_upload_image(original_url, collection_name, str(doc_id), 'basic', vehicle_name)
+                    if s3_url:
+                        # 원본 필드는 그대로 두고, S3 URL은 별도 필드에 저장
+                        s3_field = f's3_{field}'
+                        update_fields[s3_field] = s3_url
+                        images_metadata.append({
+                            'url': s3_url,
+                            'type': 'basic',
+                            'field': field,
+                            's3_field': s3_field,
+                            'original_url': original_url,  # 원본 URL 보존
+                            'vehicle_name': vehicle_name,
+                            'vehicle_brand': vehicle_brand
+                        })
+                        has_updates = True
+                        images_uploaded += 1
+                    break  # 기본 이미지는 하나만 처리
+        
+        # 2. 외관 이미지 처리 (배열)
+        for field in image_field_mapping['exterior']:
+            if field in doc and doc[field]:
+                value = doc[field]
+                if isinstance(value, list):
+                    s3_exterior = []  # S3 URL 배열 (원본과 별도로 저장)
+                    for idx, img_item in enumerate(value):
+                        img_url = None
+                        original_item = img_item  # 원본 항목 보존
+                        # 배열 항목이 문자열인지 딕셔너리인지 확인
+                        if isinstance(img_item, str) and (img_item.startswith('http://') or img_item.startswith('https://')):
+                            img_url = img_item
+                        elif isinstance(img_item, dict):
+                            # 딕셔너리에서 image 필드 찾기
+                            img_url = img_item.get('image') or img_item.get('url') or img_item.get('image_url')
+                        
+                        if img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):
+                            if is_s3_url(img_url):
+                                # 이미 S3 URL이면 메타데이터만 추가하고 원본 유지
+                                s3_exterior.append(img_item)  # S3 URL이므로 그대로 추가
+                                images_metadata.append({
+                                    'url': img_url,
+                                    'type': 'exterior',
+                                    'field': field,
+                                    'index': idx,
+                                    'original_url': img_url,
+                                    'vehicle_name': vehicle_name,
+                                    'vehicle_brand': vehicle_brand
+                                })
+                                continue
+                            # 외부 URL이면 업로드
+                            original_url = img_url
+                            s3_url = download_and_upload_image(original_url, collection_name, str(doc_id), f'exterior_{idx}', vehicle_name)
+                            if s3_url:
+                                if isinstance(img_item, dict):
+                                    # 딕셔너리면 image 필드만 S3 URL로 업데이트한 새 객체 생성
+                                    new_item = img_item.copy()
+                                    new_item['image'] = s3_url
+                                    s3_exterior.append(new_item)
+                                else:
+                                    # 문자열이면 S3 URL로 저장
+                                    s3_exterior.append(s3_url)
+                                images_metadata.append({
+                                    'url': s3_url,
+                                    'type': 'exterior',
+                                    'field': field,
+                                    'index': idx,
+                                    'original_url': original_url,  # 원본 URL 보존
+                                    'vehicle_name': vehicle_name,
+                                    'vehicle_brand': vehicle_brand
+                                })
+                                has_updates = True
+                                images_uploaded += 1
+                            else:
+                                # 업로드 실패 시 원본 항목 유지
+                                s3_exterior.append(img_item)
+                        else:
+                            # URL이 아니면 원본 항목 유지
+                            s3_exterior.append(img_item)
+                    
+                    # 원본 필드는 그대로 두고, S3 URL 배열은 별도 필드에 저장
+                    if len(s3_exterior) > 0:
+                        s3_field = f's3_{field}'
+                        update_fields[s3_field] = s3_exterior
+                        has_updates = True
+                    break  # 첫 번째 매칭 필드만 처리
+        
+        # 3. 내관 이미지 처리 (배열)
+        for field in image_field_mapping['interior']:
+            if field in doc and doc[field]:
+                value = doc[field]
+                if isinstance(value, list):
+                    s3_interior = []  # S3 URL 배열 (원본과 별도로 저장)
+                    for idx, img_item in enumerate(value):
+                        img_url = None
+                        original_item = img_item  # 원본 항목 보존
+                        # 배열 항목이 문자열인지 딕셔너리인지 확인
+                        if isinstance(img_item, str) and (img_item.startswith('http://') or img_item.startswith('https://')):
+                            img_url = img_item
+                        elif isinstance(img_item, dict):
+                            # 딕셔너리에서 image 필드 찾기
+                            img_url = img_item.get('image') or img_item.get('url') or img_item.get('image_url')
+                        
+                        if img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):
+                            if is_s3_url(img_url):
+                                # 이미 S3 URL이면 메타데이터만 추가하고 원본 유지
+                                s3_interior.append(img_item)  # S3 URL이므로 그대로 추가
+                                images_metadata.append({
+                                    'url': img_url,
+                                    'type': 'interior',
+                                    'field': field,
+                                    'index': idx,
+                                    'original_url': img_url,
+                                    'vehicle_name': vehicle_name,
+                                    'vehicle_brand': vehicle_brand
+                                })
+                                continue
+                            # 외부 URL이면 업로드
+                            original_url = img_url
+                            s3_url = download_and_upload_image(original_url, collection_name, str(doc_id), f'interior_{idx}', vehicle_name)
+                            if s3_url:
+                                if isinstance(img_item, dict):
+                                    # 딕셔너리면 image 필드만 S3 URL로 업데이트한 새 객체 생성
+                                    new_item = img_item.copy()
+                                    new_item['image'] = s3_url
+                                    s3_interior.append(new_item)
+                                else:
+                                    # 문자열이면 S3 URL로 저장
+                                    s3_interior.append(s3_url)
+                                images_metadata.append({
+                                    'url': s3_url,
+                                    'type': 'interior',
+                                    'field': field,
+                                    'index': idx,
+                                    'original_url': original_url,  # 원본 URL 보존
+                                    'vehicle_name': vehicle_name,
+                                    'vehicle_brand': vehicle_brand
+                                })
+                                has_updates = True
+                                images_uploaded += 1
+                            else:
+                                # 업로드 실패 시 원본 항목 유지
+                                s3_interior.append(img_item)
+                        else:
+                            # URL이 아니면 원본 항목 유지
+                            s3_interior.append(img_item)
+                    
+                    # 원본 필드는 그대로 두고, S3 URL 배열은 별도 필드에 저장
+                    if len(s3_interior) > 0:
+                        s3_field = f's3_{field}'
+                        update_fields[s3_field] = s3_interior
+                        has_updates = True
+                    break  # 첫 번째 매칭 필드만 처리
+        
+        # 4. 색상별 이미지 처리 (배열)
+        for field in image_field_mapping['color']:
+            if field in doc and doc[field]:
+                value = doc[field]
+                if isinstance(value, list):
+                    s3_colors = []  # S3 URL 배열 (원본과 별도로 저장)
+                    for idx, color_item in enumerate(value):
+                        color_name = None
+                        original_item = color_item  # 원본 항목 보존
+                        if isinstance(color_item, dict):
+                            # colors 배열 내 객체 (예: {name: "red", image: "url"})
+                            color_name = color_item.get('name') or color_item.get('color_name') or color_item.get('color') or f'color_{idx}'
+                            if 'image' in color_item and color_item['image']:
+                                img_url = color_item['image']
+                                if isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):
+                                    if is_s3_url(img_url):
+                                        # 이미 S3 URL이면 그대로 추가
+                                        s3_colors.append(color_item)
+                                        images_metadata.append({
+                                            'url': img_url,
+                                            'type': 'color',
+                                            'color_name': color_name,
+                                            'color_index': idx,
+                                            'original_url': img_url,
+                                            'vehicle_name': vehicle_name,
+                                            'vehicle_brand': vehicle_brand
+                                        })
+                                        continue
+                                    original_url = img_url
+                                    s3_url = download_and_upload_image(original_url, collection_name, str(doc_id), f'color_{idx}', vehicle_name, color_name)
+                                    if s3_url:
+                                        new_color_item = color_item.copy()
+                                        new_color_item['image'] = s3_url
+                                        s3_colors.append(new_color_item)
+                                        images_metadata.append({
+                                            'url': s3_url,
+                                            'type': 'color',
+                                            'color_name': color_name,
+                                            'color_index': idx,
+                                            'original_url': original_url,  # 원본 URL 보존
+                                            'vehicle_name': vehicle_name,
+                                            'vehicle_brand': vehicle_brand
+                                        })
+                                        images_uploaded += 1
+                                    else:
+                                        # 업로드 실패 시 원본 항목 유지
+                                        s3_colors.append(color_item)
+                                else:
+                                    # URL이 아니면 원본 항목 유지
+                                    s3_colors.append(color_item)
+                            else:
+                                # image 필드가 없으면 원본 항목 유지
+                                s3_colors.append(color_item)
+                        elif isinstance(color_item, str):
+                            # 문자열 배열 (예: ["url1", "url2"])
+                            color_name = f'color_{idx}'
+                            if color_item.startswith('http://') or color_item.startswith('https://'):
+                                if is_s3_url(color_item):
+                                    # 이미 S3 URL이면 그대로 추가
+                                    s3_colors.append(color_item)
+                                    images_metadata.append({
+                                        'url': color_item,
+                                        'type': 'color',
+                                        'color_name': color_name,
+                                        'color_index': idx,
+                                        'original_url': color_item,
+                                        'vehicle_name': vehicle_name,
+                                        'vehicle_brand': vehicle_brand
+                                    })
+                                    continue
+                                original_url = color_item
+                                s3_url = download_and_upload_image(original_url, collection_name, str(doc_id), f'color_{idx}', vehicle_name, color_name)
+                                if s3_url:
+                                    s3_colors.append(s3_url)
+                                    images_metadata.append({
+                                        'url': s3_url,
+                                        'type': 'color',
+                                        'color_name': color_name,
+                                        'color_index': idx,
+                                        'original_url': original_url,  # 원본 URL 보존
+                                        'vehicle_name': vehicle_name,
+                                        'vehicle_brand': vehicle_brand
+                                    })
+                                    images_uploaded += 1
+                                else:
+                                    # 업로드 실패 시 원본 항목 유지
+                                    s3_colors.append(color_item)
+                            else:
+                                # URL이 아니면 원본 항목 유지
+                                s3_colors.append(color_item)
+                        else:
+                            # 기타 타입이면 원본 항목 유지
+                            s3_colors.append(color_item)
+                    
+                    # 원본 필드는 그대로 두고, S3 URL 배열은 별도 필드에 저장
+                    if len(s3_colors) > 0:
+                        s3_field = f's3_{field}'
+                        update_fields[s3_field] = s3_colors
+                        has_updates = True
+        
+        # MongoDB 업데이트
+        if has_updates:
+            # 이미지 메타데이터도 함께 저장
+            update_fields['s3_images_metadata'] = images_metadata
+            collection.update_one(
+                {'_id': doc_id},
+                {'$set': update_fields}
+            )
+            updated += 1
+            print(f"  [{processed}/{total}] ✅ 업데이트: {doc_id} ({len(update_fields)-1}개 필드, {len(images_metadata)}개 이미지 메타데이터)")
+    
+    print(f"\n완료: {processed}개 문서 처리, {updated}개 문서 업데이트, {images_uploaded}개 이미지 업로드")
+    
+    print(f"\n=== 전체 완료 ===")
+    print(f"총 처리: {processed}개 문서")
+    print(f"총 업데이트: {updated}개 문서")
+    print(f"총 이미지 업로드: {images_uploaded}개")
 kind: ConfigMap
 metadata:
   name: car-image-migration-script

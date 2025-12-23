@@ -2,6 +2,13 @@
 
 이 디렉터리에는 Kubernetes 클러스터에 데이터베이스 및 관련 컴포넌트를 배포하기 위한 YAML 매니페스트 파일들이 포함되어 있습니다.
 
+## 📚 문서 가이드
+
+- **README.md** (이 파일): 전체 개요 및 배포 가이드
+- **BACKEND-ELASTICSEARCH-INTEGRATION-GUIDE.md**: 백엔드 Elasticsearch 통합 가이드
+- **SCRIPTS-REFERENCE.md**: 모든 스크립트 사용법 참조
+- **backup-strategy.md**: 백업 전략 및 방법
+
 ## 파일 목록 및 설명
 
 ### 1. 기본 인프라
@@ -95,7 +102,38 @@
 - **네임스페이스**: `apc-striming-ns` (또는 지정된 네임스페이스)
 - **배포 순서**: Kafka 클러스터 생성 후
 
-### 7. Crawler
+### 7. Elasticsearch & Kibana
+
+#### `elasticsearch-deployment.yaml`
+- **목적**: Elasticsearch 검색 엔진 배포
+- **내용**:
+  - StatefulSet (PV/PVC 없이 ephemeral storage 사용)
+  - Headless Service
+  - ConfigMap
+- **네임스페이스**: `apc-ek-ns`
+- **배포 순서**: 네임스페이스 생성 후
+
+#### `kibana-deployment.yaml`
+- **목적**: Kibana 대시보드 배포
+- **내용**:
+  - Deployment
+  - Service (ClusterIP)
+- **네임스페이스**: `apc-ek-ns`
+- **배포 순서**: Elasticsearch 배포 후
+
+#### `monstache-deployment.yaml`
+- **목적**: MongoDB → Elasticsearch 실시간 동기화
+- **내용**:
+  - Deployment
+  - ConfigMap (동기화 설정)
+- **네임스페이스**: `apc-ek-ns`
+- **배포 순서**: Elasticsearch 배포 후
+
+#### `elasticsearch-index-template.json`
+- **목적**: 유사어 검색을 위한 인덱스 템플릿
+- **사용법**: `elasticsearch-setup.sh` 스크립트로 적용
+
+### 8. Crawler
 
 #### `crawler-deployment.yaml`
 - **목적**: 크롤러 애플리케이션 배포
@@ -140,7 +178,15 @@
    kubectl apply -f kafka-nodepool.yaml
    ```
 
-7. **Crawler** (선택사항)
+7. **Elasticsearch & Kibana** (유사어 검색용)
+   ```bash
+   kubectl apply -f elasticsearch-deployment.yaml
+   kubectl apply -f kibana-deployment.yaml
+   kubectl apply -f monstache-deployment.yaml
+   ./elasticsearch-setup.sh  # 인덱스 템플릿 적용
+   ```
+
+8. **Crawler** (선택사항)
    ```bash
    kubectl apply -f crawler-deployment.yaml
    ```
@@ -249,4 +295,33 @@ aws s3api put-bucket-lifecycle-configuration \
 ```bash
 aws s3api get-bucket-lifecycle-configuration --bucket velero-backups-382045063773
 ```
+
+## Elasticsearch 유사어 검색
+
+Elasticsearch는 검색 백엔드에서 유사어 검색 기능을 제공하기 위해 구축되었습니다.
+
+### 주요 정보
+- **네임스페이스**: `apc-ek-ns`
+- **Elasticsearch URL**: `http://elasticsearch.apc-ek-ns.svc.cluster.local:9200`
+- **Kibana URL**: `http://kibana.apc-ek-ns.svc.cluster.local:5601`
+- **인덱스**: `vehicles` (MongoDB `triple_db.danawa_vehicle_data` 컬렉션 동기화)
+
+### 백엔드 통합
+백엔드 개발자를 위한 상세 가이드는 **`BACKEND-ELASTICSEARCH-INTEGRATION-GUIDE.md`** 파일을 참조하세요.
+
+### 주요 기능
+- 한글 오타 교정 (Fuzzy 검색)
+- 자모 분리 검색 (N-gram)
+- 부분 문자열 검색
+- 실시간 MongoDB 동기화 (Monstache)
+
+## 스크립트 및 유틸리티
+
+모든 스크립트의 사용법은 **`SCRIPTS-REFERENCE.md`** 파일을 참조하세요.
+
+주요 스크립트:
+- `deploy.sh`: 전체 배포 자동화
+- `elasticsearch-setup.sh`: Elasticsearch 인덱스 템플릿 설정
+- `setup-velero-backup.sh`: Velero 백업 설정 자동화
+- `backup-all.sh`: 전체 백업 실행
 

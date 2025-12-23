@@ -16,7 +16,7 @@ data:
   REDIS_PORT: "6379"
 
   # 관측성 설정 (주소 유지)
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy.alphacar-obsv-ns.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy.apc-obsv-ns.svc.cluster.local:4317"
 
   # AWS/AI 설정 (주소 유지)
   AWS_REGION: "us-east-1"

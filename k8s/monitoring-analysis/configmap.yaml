@@ -5,7 +5,7 @@ metadata:
   namespace: apc-obsv-ns
 data:
   # Prometheus 설정 (내부 Kubernetes 서비스)
-  PROMETHEUS_URL: "http://prometheus.alphacar-obsv-ns.svc.cluster.local:9090"
+  PROMETHEUS_URL: "http://prometheus.apc-obsv-ns.svc.cluster.local:9090"
   
   # Backend 설정
   BACKEND_PORT: "5000"

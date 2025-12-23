@@ -1,0 +1,128 @@
+{
+  "index_patterns": ["vehicles*"],
+  "template": {
+      "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "index.max_ngram_diff": 2,
+      "analysis": {
+        "analyzer": {
+          "korean_fuzzy_analyzer": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": [
+              "lowercase",
+              "korean_stop",
+              "korean_ngram_filter",
+              "korean_jamo_filter"
+            ]
+          },
+          "korean_search_analyzer": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": [
+              "lowercase",
+              "korean_stop",
+              "korean_jamo_filter"
+            ]
+          },
+          "korean_ngram_analyzer": {
+            "type": "custom",
+            "tokenizer": "keyword",
+            "filter": [
+              "lowercase",
+              "korean_ngram_filter",
+              "korean_jamo_filter"
+            ]
+          }
+        },
+        "filter": {
+          "korean_ngram_filter": {
+            "type": "ngram",
+            "min_gram": 1,
+            "max_gram": 2
+          },
+          "korean_jamo_filter": {
+            "type": "edge_ngram",
+            "min_gram": 1,
+            "max_gram": 10
+          },
+          "korean_stop": {
+            "type": "stop",
+            "stopwords": ["은", "는", "이", "가", "을", "를", "의", "에", "에서"]
+          }
+        }
+      }
+    },
+    "mappings": {
+      "properties": {
+        "vehicle_name": {
+          "type": "text",
+          "analyzer": "korean_fuzzy_analyzer",
+          "search_analyzer": "korean_search_analyzer",
+          "fields": {
+            "keyword": {
+              "type": "keyword"
+            },
+            "ngram": {
+              "type": "text",
+              "analyzer": "korean_ngram_analyzer",
+              "search_analyzer": "standard"
+            },
+            "fuzzy": {
+              "type": "text",
+              "analyzer": "korean_fuzzy_analyzer",
+              "search_analyzer": "korean_search_analyzer"
+            }
+          }
+        },
+        "brand_name": {
+          "type": "text",
+          "analyzer": "korean_fuzzy_analyzer",
+          "search_analyzer": "korean_search_analyzer",
+          "fields": {
+            "keyword": {
+              "type": "keyword"
+            },
+            "fuzzy": {
+              "type": "text",
+              "analyzer": "korean_fuzzy_analyzer",
+              "search_analyzer": "korean_search_analyzer"
+            }
+          }
+        },
+        "model_name": {
+          "type": "text",
+          "analyzer": "korean_fuzzy_analyzer",
+          "search_analyzer": "korean_search_analyzer",
+          "fields": {
+            "keyword": {
+              "type": "keyword"
+            },
+            "fuzzy": {
+              "type": "text",
+              "analyzer": "korean_fuzzy_analyzer",
+              "search_analyzer": "korean_search_analyzer"
+            }
+          }
+        },
+        "model_id": {
+          "type": "keyword"
+        },
+        "lineup_id": {
+          "type": "keyword"
+        },
+        "trim_name": {
+          "type": "text",
+          "analyzer": "korean_fuzzy_analyzer",
+          "search_analyzer": "korean_search_analyzer",
+          "fields": {
+            "keyword": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -177,3 +177,4 @@ log_info "  2. Velero BackupStorageLocation 업데이트"
 log_info "  3. 백업 테스트 실행"
 
 
+

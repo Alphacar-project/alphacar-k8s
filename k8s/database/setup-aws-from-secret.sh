@@ -229,3 +229,4 @@ log_info "  1. 백업 테스트: ./backup-all.sh"
 log_info "  2. 백업 상태 확인: kubectl get backups -n $NAMESPACE"
 log_info "  3. Schedule 확인: kubectl get schedule -n $NAMESPACE"
 
+

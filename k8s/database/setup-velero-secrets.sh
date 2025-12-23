@@ -123,3 +123,4 @@ log_info "Secret 확인:"
 kubectl get secret "$SECRET_NAME" -n "$NAMESPACE"
 
 
+

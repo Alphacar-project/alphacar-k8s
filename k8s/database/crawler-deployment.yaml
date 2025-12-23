@@ -81,4 +81,3 @@ spec:
         hostPath:
           path: /home/alphacar/dbbackup/a/core
           type: Directory
-
