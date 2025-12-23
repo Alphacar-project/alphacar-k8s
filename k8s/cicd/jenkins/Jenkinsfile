@@ -2,12 +2,17 @@ pipeline {
     agent any
 
     environment {
+        // [설정] 서버 IP 및 하버 프로젝트 설정
         HARBOR_URL = '192.168.0.170:30000'
         HARBOR_PROJECT = 'alphacar'
+        
+        // [설정] 서비스 목록 (실제 폴더명과 일치해야 함)
         SERVICES = 'aichat community main mypage news quote search'
+
+        // [설정] GitOps를 위한 매니페스트 저장소
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
 
-        // [확인] image_ad8411.png의 ID와 일치
+        // [자격증명] image_ad8411.png의 ID와 정확히 일치
         GIT_CREDENTIAL_ID = 'github-cred'
         DOCKER_CREDENTIAL_ID = 'harbor-cred'
     }
@@ -18,24 +23,30 @@ pipeline {
                 cleanWs()
                 checkout scm
                 script {
+                    // Git Short Hash 추출
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                }
-                dir('dev/alphacar') {
-                    // [중요] image_ae64ea.png의 Name인 'SonarQube'로 수정
-                    withSonarQubeEnv('SonarQube') {
-                        sh "sonar-scanner \
-                            -Dsonar.projectKey=alphacar-backend \
-                            -Dsonar.sources=backend \
-                            -Dsonar.host.url=http://192.168.0.170:32000"
+                    
+                    // [해결] Jenkins Global Tool Configuration에 등록한 스캐너 경로 가져오기
+                    def scannerHome = tool name: 'sonar-scanner'
+                    
+                    dir('dev/alphacar') {
+                        // [해결] image_ae64ea.png의 서버 이름 'SonarQube' 사용
+                        withSonarQubeEnv('SonarQube') {
+                            sh "${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=alphacar-backend \
+                                -Dsonar.sources=backend \
+                                -Dsonar.host.url=http://192.168.0.170:32000"
+                        }
                     }
                 }
             }
         }
 
-        stage('2. 병렬 빌드 & 푸시') {
+        stage('2. 병렬 빌드 & 하버 푸시') {
             steps {
                 script {
                     def serviceList = env.SERVICES.split(' ')
+                    // 리소스 보호를 위해 2개씩 병렬 처리
                     for (int i = 0; i < serviceList.size(); i += 2) {
                         def batch = serviceList[i..(Math.min(i + 1, serviceList.size() - 1))]
                         def actions = [:]
@@ -43,10 +54,12 @@ pipeline {
                         batch.each { service ->
                             actions["Build-${service}"] = {
                                 stage("Process ${service}") {
+                                    echo "🔨 [${service}] 빌드 중..."
                                     dir('dev/alphacar') {
-                                        // Dockerfile 경로: backend/${service}/Dockerfile
+                                        // [경로확인] backend/${service}/Dockerfile 위치 사용
                                         sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
 
+                                        // Harbor 로그인 및 이미지 푸시
                                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                                             sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
                                             sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
@@ -61,9 +74,10 @@ pipeline {
             }
         }
 
-        stage('3. GitOps 업데이트') {
+        stage('3. ArgoCD GitOps 업데이트') {
             steps {
                 script {
+                    echo "🚀 [GitOps] 매니페스트 이미지 태그 업데이트 시작"
                     dir('manifest-update') {
                         checkout([$class: 'GitSCM',
                             branches: [[name: 'main']],
@@ -72,14 +86,19 @@ pipeline {
 
                         def serviceList = env.SERVICES.split(' ')
                         for (service in serviceList) {
+                            // k8s/backend/ 폴더 내의 각 서비스 yaml 수정
                             def yamlPath = "k8s/backend/${service}-backend.yaml"
                             sh """
                                 if [ -f "${yamlPath}" ]; then
+                                    echo "📝 [${service}] 업데이트 중..."
                                     sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}|' ${yamlPath}
+                                else
+                                    echo "⚠️ 파일을 찾을 수 없음: ${yamlPath}"
                                 fi
                             """
                         }
 
+                        // Git 변경사항 푸시 (인증은 credential.helper가 처리)
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
@@ -87,11 +106,21 @@ pipeline {
                             if [ -n "\$(git status --porcelain)" ]; then
                                 git commit -m "Update images to ${env.GIT_SHA} [skip ci]"
                                 git push origin main
+                            else
+                                echo "✅ 변경사항 없음"
                             fi
                         """
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            // 디스크 공간 확보를 위해 빌드 후 정리
+            sh "docker image prune -f"
+            cleanWs()
         }
     }
 }
