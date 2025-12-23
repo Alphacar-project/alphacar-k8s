@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     parameters {
-        // 프론트엔드 빌드 실행 여부를 선택할 수 있는 파라미터
         choice(name: 'ACTION',
                choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
@@ -30,12 +29,14 @@ pipeline {
                 checkout scm
                 script {
                     def baseVer = "1.0"
+                    // 실제 소스 위치인 dev/alphacar/frontend 내부의 version.txt 참조
+                    def versionPath = 'dev/alphacar/frontend/version.txt'
                     try {
-                        if (fileExists('frontend/version.txt')) {
-                            baseVer = readFile('frontend/version.txt').trim()
+                        if (fileExists(versionPath)) {
+                            baseVer = readFile(versionPath).trim()
                         }
                     } catch (e) {
-                        echo "⚠️ version.txt 없음 → 1.0 사용"
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
@@ -49,7 +50,8 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    dir('frontend') {
+                    // 소나큐브 분석 대상 경로 수정
+                    dir('dev/alphacar/frontend') {
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                             sh """
                                 ${scannerHome}/bin/sonar-scanner \
@@ -74,10 +76,10 @@ pipeline {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     def imageLatestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 
-                    echo "🐳 이미지 빌드 시작 (경로 최적화)..."
+                    echo "🐳 이미지 빌드 시작 (경로 수정 완료)..."
                     
-                    // [해결] frontend 폴더 내부로 진입하여 Dockerfile을 찾지 못하는 문제 해결
-                    dir('frontend') {
+                    // [핵심 수정] Dockerfile이 있는 실제 경로로 진입
+                    dir('dev/alphacar/frontend') {
                         sh "docker build -f Dockerfile -t ${imageFullTag} -t ${imageLatestTag} ."
 
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
