@@ -1,9 +1,7 @@
-alphacar@a-master1:~/alphacar-final/k8s/cicd/jenkins$ cat frontend.Jenkinsfile
 pipeline {
     agent any
 
     parameters {
-        // [추가] 프론트엔드 빌드 실행 여부를 선택할 수 있도록 설정
         choice(name: 'ACTION',
                choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
@@ -11,10 +9,10 @@ pipeline {
     }
 
     environment {
-        HARBOR_URL     = '192.168.0.170:30000'
-        HARBOR_PROJECT = 'alphacar'
-        IMAGE_NAME     = 'frontend'
-        HARBOR_CRED_ID = 'harbor-cred'
+        HARBOR_URL      = '192.168.0.170:30000'
+        HARBOR_PROJECT  = 'alphacar'
+        IMAGE_NAME      = 'frontend'
+        HARBOR_CRED_ID  = 'harbor-cred'
         GIT_CREDENTIAL_ID = 'github-cred'
 
         SONARQUBE_NAME = 'SonarQube'
@@ -25,7 +23,6 @@ pipeline {
 
     stages {
         stage('1. Prepare') {
-            // [최적화] 사용자가 skip_build를 선택하면 이 단계 이후는 실행되지 않음
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 cleanWs()
@@ -49,8 +46,6 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-
-                    // [최적화] 분석 대상을 frontend 폴더로 한정하고 제외 패턴 강화
                     dir('frontend') {
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                             sh """
@@ -77,7 +72,6 @@ pipeline {
                     def imageLatestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 
                     echo "🐳 이미지 빌드 시작..."
-                    // [최적화] BuildKit 캐시를 활용하여 빌드 시간 단축
                     sh """
                         export DOCKER_BUILDKIT=1
                         docker build \
@@ -122,4 +116,19 @@ pipeline {
                                 if [ -n "\$(git status --porcelain)" ]; then
                                     git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                     git push origin main
-
+                                fi
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            sh "docker image prune -f"
+            cleanWs()
+        }
+    }
+}
