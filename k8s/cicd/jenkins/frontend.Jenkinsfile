@@ -1,10 +1,11 @@
+alphacar@a-master1:~/alphacar-final/k8s/cicd/jenkins$ cat frontend.Jenkinsfile
 pipeline {
     agent any
 
     parameters {
         // [추가] 프론트엔드 빌드 실행 여부를 선택할 수 있도록 설정
-        choice(name: 'ACTION', 
-               choices: ['build_and_deploy', 'skip_build'], 
+        choice(name: 'ACTION',
+               choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
         string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
     }
@@ -18,7 +19,7 @@ pipeline {
 
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
-        
+
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
     }
 
@@ -48,7 +49,7 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    
+
                     // [최적화] 분석 대상을 frontend 폴더로 한정하고 제외 패턴 강화
                     dir('frontend') {
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
@@ -114,10 +115,11 @@ pipeline {
                             if [ -f "${yamlPath}" ]; then
                                 echo "📝 Manifest 업데이트 중..."
                                 sed -i 's|image: .*/frontend:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${yamlPath}
-                                
+
                                 git config user.email "jenkins@alphacar.com"
                                 git config user.name "Jenkins-CI"
                                 git add .
                                 if [ -n "\$(git status --porcelain)" ]; then
                                     git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                     git push origin main
+
