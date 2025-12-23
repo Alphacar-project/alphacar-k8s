@@ -29,9 +29,11 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 # 6. 결과물 복사
+# rootDir이 "./"이면 dist/main.js, rootDir이 ".."이면 dist/quote/src/main.js
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
 EXPOSE 3000
-CMD ["node", "dist/main"]
+# rootDir이 "./"이고 src/main.ts가 있으므로 dist/src/main.js가 생성됨
+CMD ["node", "dist/src/main.js"]

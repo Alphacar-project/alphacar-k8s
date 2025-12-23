@@ -176,7 +176,13 @@ function CompareVsContent() {
             return true;
         }
 
-        // 2. ID가 없어서 'opt-순서'로 넘어온 경우 확인 (Fallback)
+        // 2. ID가 없어서 인덱스로 넘어온 경우 확인 (compare 페이지에서 opt._id || String(idx) 사용)
+        const indexId = String(index);
+        if (selectedSet.has(indexId)) {
+            return true;
+        }
+
+        // 3. Fallback: 'opt-순서' 형식 확인
         const tempIndexId = `opt-${index}`;
         if (selectedSet.has(tempIndexId)) {
             return true;
@@ -452,7 +458,7 @@ function CompareVsContent() {
                 return (
                   <div key={idx} style={{
                     display: "grid",
-                    gridTemplateColumns: `${row.values.map(() => "1fr").join(" ")} 140px`,
+                    gridTemplateColumns: "1fr auto 1fr",
                     gap: "20px",
                     alignItems: "center",
                     padding: "16px 20px",
@@ -460,53 +466,79 @@ function CompareVsContent() {
                     backgroundColor: idx % 2 === 0 ? "#fff" : "#fafafa",
                     fontSize: "14px"
                   }}>
-                    {row.values.map((value, carIdx) => {
-                      const priceDiff = value.val - baseVal;
-                      const isHigher = priceDiff > 0;
-                      const isLower = priceDiff < 0;
-
-                      return (
-                        <div key={carIdx} style={{
-                          textAlign: "center",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          gap: "4px"
-                        }}>
-                          <div style={{
-                            fontWeight: "700",
-                            fontSize: "15px",
-                            color: carIdx === 0 ? "#333" : (isHigher ? "#d32f2f" : isLower ? "#1976d2" : "#333")
-                          }}>
-                            {value.text}
-                          </div>
-                          {carIdx > 0 && priceDiff !== 0 && (
-                            <div style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              fontSize: "12px",
-                              fontWeight: "600"
-                            }}>
-                              <span style={{
-                                color: isHigher ? "#ff4444" : "#4a9eff",
-                                fontSize: "10px"
-                              }}>
-                                {isHigher ? "▲" : "▼"}
-                              </span>
-                              <span style={{
-                                color: isHigher ? "#ff4444" : "#4a9eff"
-                              }}>
-                                {formatPrice(Math.abs(priceDiff))}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div style={{ textAlign: "center", color: "#777", fontSize: "13px", fontWeight: "normal" }}>
+                    {/* 차량 1 가격 (왼쪽) */}
+                    <div style={{
+                      textAlign: "left",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: "4px"
+                    }}>
+                      <div style={{
+                        fontWeight: "700",
+                        fontSize: "15px",
+                        color: "#333"
+                      }}>
+                        {row.values[0].text}
+                      </div>
+                    </div>
+                    
+                    {/* 라벨 (가운데) */}
+                    <div style={{ textAlign: "center", color: "#777", fontSize: "13px", fontWeight: "normal", whiteSpace: "nowrap" }}>
                       {row.label}
                     </div>
+                    
+                    {/* 차량 2 가격 (오른쪽) */}
+                    {row.values.length > 1 && (
+                      <div style={{
+                        textAlign: "right",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: "4px"
+                      }}>
+                        {row.values.slice(1).map((value, carIdx) => {
+                          const priceDiff = value.val - baseVal;
+                          const isHigher = priceDiff > 0;
+                          const isLower = priceDiff < 0;
+
+                          return (
+                            <div key={carIdx}>
+                              <div style={{
+                                fontWeight: "700",
+                                fontSize: "15px",
+                                color: isHigher ? "#d32f2f" : isLower ? "#1976d2" : "#333"
+                              }}>
+                                {value.text}
+                              </div>
+                              {priceDiff !== 0 && (
+                                <div style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "flex-end",
+                                  gap: "4px",
+                                  fontSize: "12px",
+                                  fontWeight: "600",
+                                  marginTop: "4px"
+                                }}>
+                                  <span style={{
+                                    color: isHigher ? "#ff4444" : "#4a9eff",
+                                    fontSize: "10px"
+                                  }}>
+                                    {isHigher ? "▲" : "▼"}
+                                  </span>
+                                  <span style={{
+                                    color: isHigher ? "#ff4444" : "#4a9eff"
+                                  }}>
+                                    {formatPrice(Math.abs(priceDiff))}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}

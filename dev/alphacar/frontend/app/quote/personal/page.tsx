@@ -57,7 +57,7 @@ interface VehicleData {
 }
 
 interface CarSelectorProps {
-  onSelectComplete: (trimId: string, modelName?: string) => void;
+  onSelectComplete: (trimId: string, modelName?: string, baseTrimId?: string) => void;
   onReset?: () => void;
   initialData?: {
     makerId?: string;
@@ -309,11 +309,11 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
 
     // 상태 업데이트 후 onSelectComplete 호출
     if (onSelectComplete) {
-      // trimId는 lineup_id 또는 trim_name일 수 있음
-      // 백엔드에서 lineup_id 기반으로 검색하므로 그대로 전달
+      // trimId는 _id 또는 trim_name일 수 있음
+      // _id를 우선 사용하여 고유성 보장
       const selectedModel = models.find((m: Model) => m._id === modelId);
       const modelName = selectedModel?.model_name || selectedModel?.name || "";
-      onSelectComplete(newTrimId, modelName); // lineup_id를 그대로 전달
+      onSelectComplete(newTrimId, modelName, baseTrimId); // _id 또는 trim_name을 전달, baseTrimId도 함께 전달
     }
   };
 
@@ -381,8 +381,8 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
             ) : (
                trims.map((t, idx) => {
                  const uniqueKey = t._id || `trim-${idx}`;
-                 // lineup_id를 우선 사용, 없으면 trim_name 사용
-                 const val = t.lineup_id || t._id || t.trim_name || t.name || "";
+                 // _id를 우선 사용 (고유성 보장), 없으면 trim_name 사용
+                 const val = t._id || t.trim_name || t.name || t.lineup_id || "";
                  return <option key={uniqueKey} value={val}>{t.name || t.trim_name}</option>;
                })
             )}
@@ -447,12 +447,15 @@ function PersonalQuotePageContent() {
   } | undefined>(undefined);
 
   // ✅ [핵심 수정] 트림 추출 및 병합 로직을 포함한 fetch 함수
-  const fetchCarDetail = async (trimId: string, modelName?: string): Promise<VehicleData | null> => {
+  const fetchCarDetail = async (trimId: string, modelName?: string, baseTrimId?: string): Promise<VehicleData | null> => {
     try {
       // 차종 이름이 있으면 함께 전달
       const queryParams = new URLSearchParams({ trimId });
       if (modelName) {
         queryParams.append('modelName', modelName);
+      }
+      if (baseTrimId) {
+        queryParams.append('baseTrimId', baseTrimId);
       }
       const res = await fetch(`${API_BASE}/vehicles/detail?${queryParams.toString()}`);
       if (!res.ok) {
@@ -471,15 +474,20 @@ function PersonalQuotePageContent() {
           // "Reserve A/T:1" 형식에서 실제 트림 이름만 추출 (":숫자" 제거)
           const trimNameOnly = decodedTrimId.split(':')[0].trim();
           
-          // 1. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
-          selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+          // 1. _id로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
+          selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
 
-          // 2. ID로 찾기 (Fallback)
+          // 2. trim_id로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t._id === trimId || t.trim_id === trimId);
+              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
           }
 
-          // 3. Fallback: 여전히 못 찾았다면 첫 번째 트림 사용
+          // 3. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
+          if (!selectedTrim) {
+              selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+          }
+
+          // 4. Fallback: 여전히 못 찾았다면 첫 번째 트림 사용
           if (!selectedTrim) {
               selectedTrim = trims[0]; 
           }
@@ -507,8 +515,8 @@ function PersonalQuotePageContent() {
     }
   };
 
-  const handleSelectComplete = async (trimId: string, modelName?: string) => {
-    const data = await fetchCarDetail(trimId, modelName);
+  const handleSelectComplete = async (trimId: string, modelName?: string, baseTrimId?: string) => {
+    const data = await fetchCarDetail(trimId, modelName, baseTrimId);
     if (data) {
       setCarData(data);
       
@@ -582,7 +590,7 @@ function PersonalQuotePageContent() {
   const findMakerAndModelByName = async (modelName: string, brandName?: string) => {
     try {
       // 1. 모든 제조사 목록 가져오기
-      const makersRes = await fetch(`${API_BASE}/makers`);
+      const makersRes = await fetch(`${API_BASE}/vehicles/makers`);
       const makersData = await makersRes.json();
       if (!Array.isArray(makersData)) return null;
 

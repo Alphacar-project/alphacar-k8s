@@ -64,12 +64,15 @@ export class VehiclesController {
 
   // 5. 상세 결과 조회 (Flexible Search)
   @Get('detail')
-  async getTrimDetail(@Query('trimId') trimId: string) {
-    this.logger.log(`[REQ] GET /vehicles/detail 요청 수신: trimId=${trimId}`);
+  async getTrimDetail(
+    @Query('trimId') trimId: string, 
+    @Query('modelName') modelName?: string,
+    @Query('baseTrimId') baseTrimId?: string
+  ) {
+    this.logger.log(`[REQ] GET /vehicles/detail 요청 수신: trimId=${trimId}, modelName=${modelName || '없음'}, baseTrimId=${baseTrimId || '없음'}`);
     
-    this.logger.log(`[DEBUG CALL] Calling VehiclesService.findOneByTrimId with: ${trimId}`); 
-    
-    return this.vehiclesService.findOneByTrimId(trimId);
+    // AppService의 getTrimDetail 사용 (이미지 필드 포함된 변환된 데이터 반환)
+    return this.appService.getTrimDetail(trimId, modelName, baseTrimId);
   }
   
   // 6. [신규 구현] 비교 데이터 (다중 차량 조회)

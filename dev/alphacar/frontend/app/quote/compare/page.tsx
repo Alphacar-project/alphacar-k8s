@@ -52,7 +52,7 @@ const handleApiResponse = async (res: Response) => {
 // ---------------- [1] 공통 컴포넌트: 차량 선택 박스 ----------------
 interface CarSelectorProps {
   title: string;
-  onSelectComplete: (trimId: string, modelName?: string) => void;
+  onSelectComplete: (trimId: string, modelName?: string, baseTrimId?: string) => void;
   onReset?: () => void;
   resetSignal: number;
 }
@@ -178,11 +178,11 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
       return;
     }
     if (onSelectComplete) {
-      // trimId는 lineup_id 또는 trim_name일 수 있음
-      // 백엔드에서 lineup_id 기반으로 검색하므로 그대로 전달
+      // trimId는 _id 또는 trim_name일 수 있음
+      // _id를 우선 사용하여 고유성 보장
       const selectedModel = models.find((m: any) => m._id === modelId);
       const modelName = selectedModel?.model_name || selectedModel?.name || "";
-      onSelectComplete(trimId, modelName); // lineup_id를 그대로 전달
+      onSelectComplete(trimId, modelName, baseTrimId); // _id 또는 trim_name을 전달, baseTrimId도 함께 전달
     }
   };
 
@@ -242,8 +242,8 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
             ) : (
                trims.map((t, idx) => {
                  const uniqueKey = t._id ? t._id : `trim-${idx}`;
-                 // lineup_id를 우선 사용, 없으면 trim_name 사용
-                 const val = t.lineup_id || t._id || t.trim_name || t.name;
+                 // _id를 우선 사용 (고유성 보장), 없으면 trim_name 사용
+                 const val = t._id || t.trim_name || t.name || t.lineup_id;
                  return <option key={uniqueKey} value={val}>{t.name || t.trim_name}</option>;
                })
             )}
@@ -394,12 +394,15 @@ function CompareQuoteContent() {
   const [resetSignals, setResetSignals] = useState<number[]>([0, 0]); // 각 차량별 리셋 신호
 
   // ✅ 데이터 추출 및 병합 로직을 포함한 fetch 함수
-  const fetchCarDetail = async (trimId: string, modelName?: string): Promise<VehicleData | null> => {
+  const fetchCarDetail = async (trimId: string, modelName?: string, baseTrimId?: string): Promise<VehicleData | null> => {
     try {
       // 차종 이름이 있으면 함께 전달
       const queryParams = new URLSearchParams({ trimId });
       if (modelName) {
         queryParams.append('modelName', modelName);
+      }
+      if (baseTrimId) {
+        queryParams.append('baseTrimId', baseTrimId);
       }
       const res = await fetch(`${API_BASE}/vehicles/detail?${queryParams.toString()}`);
       if (!res.ok) {
@@ -422,23 +425,28 @@ function CompareQuoteContent() {
           // "Reserve A/T:1" 형식에서 실제 트림 이름만 추출 (":숫자" 제거)
           const trimNameOnly = decodedTrimId.split(':')[0].trim();
 
-          // A. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
-          selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+          // A. _id로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
+          selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
 
-          // B. ID로 찾기 (ObjectId 대응)
+          // B. trim_id로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t._id === trimId || t.trim_id === trimId);
+              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
           }
 
-          // C. Fallback: 여전히 못 찾았다면 첫 번째 트림을 기본값으로 사용
+          // C. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
+          if (!selectedTrim) {
+              selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+          }
+
+          // D. Fallback: 여전히 못 찾았다면 첫 번째 트림을 기본값으로 사용
           if (!selectedTrim) {
               selectedTrim = trims[0];
           }
       }
       
       if (!selectedTrim) {
-          console.warn("트림 데이터가 없어 차량을 표시할 수 없습니다.");
-          throw new Error("선택된 트림 정보를 찾을 수 없습니다.");
+          console.warn("트림 데이터가 없어 기본 차량 정보만 표시됩니다.");
+          return rawVehicleData; // 트림이 없어도 기본적인 Vehicle 정보만 반환
       }
 
       // 2. Vehicle + Trim 데이터 병합 (Card 컴포넌트가 기대하는 flat 구조 생성)
@@ -545,8 +553,8 @@ function CompareQuoteContent() {
   };
 
   // 차량 선택 핸들러 (인덱스 기반)
-  const handleSelectCar = (index: number) => async (trimId: string, modelName?: string) => {
-    const data = await fetchCarDetail(trimId, modelName);
+  const handleSelectCar = (index: number) => async (trimId: string, modelName?: string, baseTrimId?: string) => {
+    const data = await fetchCarDetail(trimId, modelName, baseTrimId);
     if (data) {
       setCarsData(prev => {
         const newCars = [...prev];

@@ -13,10 +13,14 @@ export class VehiclesController {
    * @GET /vehicles/detail?trimId={vehicle_id}
    */
   @Get('detail')
-  async getTrimDetail(@Query('trimId') trimId: string): Promise<any> {
-    this.logger.log(`GET /vehicles/detail 요청 수신: Vehicle/Trim ID ${trimId}`);
+  async getTrimDetail(
+    @Query('trimId') trimId: string, 
+    @Query('modelName') modelName?: string,
+    @Query('baseTrimId') baseTrimId?: string
+  ): Promise<any> {
+    this.logger.log(`GET /vehicles/detail 요청 수신: Vehicle/Trim ID ${trimId}, modelName=${modelName || '없음'}, baseTrimId=${baseTrimId || '없음'}`);
     // trimId는 AppService에서 vehicle_id로 처리됩니다.
-    return this.appService.getTrimDetail(trimId);
+    return this.appService.getTrimDetail(trimId, modelName, baseTrimId);
   }
   
   /**

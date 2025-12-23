@@ -231,29 +231,31 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
 
   // ✅ [최종 수정] 이동 로직: 개별 견적 페이지로 이동 (트림 지정 없이 모델만 선택)
   const handleGoToQuoteResult = () => {
-    if (!targetId) {
-      // 여전히 ID가 없다면 콘솔에 전체 객체를 찍어서 확인
-      console.error("ID Missing in car object:", car);
-      alert("차량 ID 정보를 불러오지 못했습니다.");
-      return;
-    }
-    
     // 차량 이름에서 브랜드명과 모델명 추출 (예: "[기아] 모닝" -> 브랜드: "기아", 모델: "모닝")
-    const vehicleName = carDetail?.vehicle_name || car?.vehicle_name || car?.name || "";
+    const vehicleName = carDetail?.vehicle_name || car?.vehicle_name || car?.name || carName || "";
     const brandMatch = vehicleName.match(/\[([^\]]+)\]/);
-    const brandName = brandMatch ? brandMatch[1] : (carDetail?.brand_name || car?.brand_name || car?.manufacturer || "");
-    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0] || "";
+    const extractedBrandName = brandMatch ? brandMatch[1] : (carDetail?.brand_name || car?.brand_name || car?.manufacturer || brandName || "");
+    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0].trim() || "";
     
     // 개별 견적 페이지로 이동 (트림은 선택되지 않은 상태, 모델만 전달)
     const queryParams = new URLSearchParams();
     if (extractedModelName) {
       queryParams.append('modelName', extractedModelName);
     }
-    if (brandName) {
-      queryParams.append('brandName', brandName);
+    if (extractedBrandName) {
+      queryParams.append('brandName', extractedBrandName);
     }
-    // trimId는 전달하지 않아서 모델만 선택된 상태로 표시
-    router.push(`/quote/personal?${queryParams.toString()}`);
+    
+    // trimId가 있으면 전달 (선택된 트림이 있는 경우)
+    if (targetId) {
+      queryParams.append('trimId', targetId);
+    }
+    
+    const queryString = queryParams.toString();
+    const url = `/quote/personal${queryString ? `?${queryString}` : ''}`;
+    
+    console.log("Navigating to:", url, { extractedModelName, extractedBrandName, targetId });
+    router.push(url);
   };
 
   // 제원 정보 포맷팅

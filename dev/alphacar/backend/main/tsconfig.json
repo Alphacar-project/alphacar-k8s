@@ -21,10 +21,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "rootDir": "../..",
-    "paths": {
-      "@schemas/*": ["../../schemas/*"]
-    }
+    "rootDir": "./"
   },
-  "include": ["src/**/*", "../../schemas/**/*"]
+  "include": ["src/**/*"]
 }
