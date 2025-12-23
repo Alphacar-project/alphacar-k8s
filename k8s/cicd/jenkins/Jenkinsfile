@@ -1,0 +1,121 @@
+pipeline {
+    agent any
+
+    environment {
+        HARBOR_URL = '192.168.0.169'
+        HARBOR_PROJECT = 'giri'
+        SERVICES = 'aichat community main mypage news quote search'
+
+        // [최종 확인] Argo CD용 매니페스트 저장소 주소
+        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
+        
+        GIT_CREDENTIAL_ID = 'github-cred'
+        DOCKER_CREDENTIAL_ID = 'harbor-cred'
+    }
+
+    stages {
+        stage('1. Prepare & SonarQube') {
+            steps {
+                cleanWs()
+                checkout scm
+                script {
+                    // 이미지 태그로 사용할 Git Short Hash 추출
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    
+                    def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    env.PATH = "${sonarPath}/bin:${env.PATH}"
+                }
+                dir('dev/alphacar') {
+                    withSonarQubeEnv('sonarqube') {
+                        sh "sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.sources=backend -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000"
+                    }
+                }
+            }
+        }
+
+        stage('2. 안전한 병렬 빌드 & 푸시 (2개씩)') {
+            steps {
+                script {
+                    def serviceList = env.SERVICES.split(' ')
+                    // 서버 자원 보호를 위해 2개씩 순차적 병렬 실행
+                    for (int i = 0; i < serviceList.size(); i += 2) {
+                        def batch = serviceList[i..(Math.min(i + 1, serviceList.size() - 1))]
+                        def actions = [:]
+
+                        batch.each { service ->
+                            actions["Build-${service}"] = {
+                                stage("Process ${service}") {
+                                    echo "🔨 [${service}] 작업 시작..."
+                                    dir('dev/alphacar') {
+                                        // 도커 빌드 (안정성을 위해 필요시 --no-cache 추가 가능)
+                                        sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA} backend/"
+
+                                        // 하버 로그인 및 푸시
+                                        withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                                            sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
+                                            sh "docker push ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        parallel actions
+                        sh "sleep 3"
+                    }
+                }
+            }
+        }
+
+        stage('3. Update Manifests (GitOps)') {
+            steps {
+                script {
+                    echo "🚀 [GitOps] Manifest 저장소 업데이트 시작"
+                    dir('manifest-update') {
+                        // [수정] LocalBranch: 'main'을 설정하여 Detached HEAD 문제를 해결합니다.
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
+                            extensions: [[$class: 'LocalBranch', localBranch: 'main']], 
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+
+                        def serviceList = env.SERVICES.split(' ')
+                        for (service in serviceList) {
+                            def yamlPath = "k8s/backend/${service}-backend.yaml"
+                            
+                            // 파일 존재 여부를 확인하여 에러 방지
+                            sh """
+                                if [ -f "${yamlPath}" ]; then
+                                    echo "📝 [${service}] 업데이트 중..."
+                                    sed -i 's|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.GIT_SHA}|' ${yamlPath}
+                                else
+                                    echo "⚠️ [${service}] 파일을 찾을 수 없어 건너뜁니다: ${yamlPath}"
+                                fi
+                            """
+                        }
+
+                        // [수정] 변경 사항이 있을 때만 Push 진행
+                        sh """
+                            git config user.email "jenkins@alphacar.com"
+                            git config user.name "Jenkins-CI"
+                            git add .
+                            if [ -n "\$(git status --porcelain)" ]; then
+                                git commit -m "Update images to ${env.GIT_SHA} [skip ci]"
+                                git push origin main
+                            else
+                                echo "✅ 변경사항이 없으므로 푸시를 생략합니다."
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // 모든 작업 완료 후 도커 이미지 정리
+            sh "docker image prune -f"
+            cleanWs()
+        }
+    }
+}
