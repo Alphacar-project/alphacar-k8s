@@ -31,7 +31,6 @@ pipeline {
                 script {
                     def baseVer = "1.0"
                     try {
-                        // frontend/version.txt가 있으면 읽어오고 없으면 기본값 사용
                         if (fileExists('frontend/version.txt')) {
                             baseVer = readFile('frontend/version.txt').trim()
                         }
@@ -75,8 +74,8 @@ pipeline {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     def imageLatestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 
-                    echo "🐳 이미지 빌드 시작..."
-                    // [해결] buildx 에러 방지를 위해 일반 docker build 사용
+                    echo "🐳 이미지 빌드 시작 (표준 모드)..."
+                    // [수정] 에러를 유발하는 DOCKER_BUILDKIT=1과 --progress=plain을 삭제함
                     sh """
                         docker build \
                             -f frontend/Dockerfile \
