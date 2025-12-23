@@ -3,8 +3,8 @@ pipeline {
 
     parameters {
         // [복구] 빌드할 서비스를 선택할 수 있는 파라미터
-        choice(name: 'SERVICE_NAME', 
-               choices: ['all', 'aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search'], 
+        choice(name: 'SERVICE_NAME',
+               choices: ['all', 'aichat', 'community', 'main', 'mypage', 'news', 'quote', 'search'],
                description: '빌드 및 검사할 서비스를 선택하세요. (기본값: all)')
         string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
     }
@@ -27,7 +27,7 @@ pipeline {
                 script {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${params.VERSION}.${currentBuild.number}-${env.GIT_SHA}"
-                    
+
                     // 빌드 대상 목록 설정
                     if (params.SERVICE_NAME == 'all') {
                         env.SERVICES_LIST = 'aichat community main mypage news quote search'
@@ -44,11 +44,10 @@ pipeline {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     def services = env.SERVICES_LIST.split(' ')
-                    
+
                     withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                         for (service in services) {
                             echo "🔍 [${service}] 소나큐브 분석 시작..."
-                            // [최적화] 전체가 아닌 선택된 서비스 폴더만 정밀 검사하여 시간 단축
                             sh """
                                 ${scannerHome}/bin/sonar-scanner \
                                 -Dsonar.projectKey=alphacar-${service} \
@@ -77,8 +76,10 @@ pipeline {
                         batch.each { service ->
                             actions["Build-${service}"] = {
                                 stage("Process ${service}") {
+                                    // [수정] tsconfig.json을 찾을 수 있도록 각 서비스 폴더로 직접 진입
                                     dir("dev/alphacar/backend/${service}") {
-                                        sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION} -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest backend/"
+                                        // [수정] 빌드 컨텍스트를 현재 폴더(.)로 지정
+                                        sh "docker build -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION} -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest ."
 
                                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                                             sh "echo \$PASS | docker login ${HARBOR_URL} -u \$USER --password-stdin"
@@ -135,19 +136,4 @@ pipeline {
             cleanWs()
         }
     }
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: frontend-scaler
-  namespace: apc-fe-ns  
-spec:
-  scaleTargetRef:
-    name: frontend      
-  minReplicaCount: 2    
-  maxReplicaCount: 10   
-  triggers:
-    - type: cpu
-      metricType: Utilization
-      metadata:
-        value: "60"    
 }
