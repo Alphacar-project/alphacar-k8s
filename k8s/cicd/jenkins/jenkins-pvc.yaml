@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: jenkins-pvc
-  namespace: jenkins
+  namespace: apc-cicd-ns
 spec:
   accessModes:
     - ReadWriteOnce
