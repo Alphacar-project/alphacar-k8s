@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+      - name: sonarqube
+        image: sonarqube:lts
+        ports:
+        - containerPort: 9000
+        resources:
+          limits:
+            memory: "2Gi"  # 소나큐브는 메모리를 많이 소모하므로 2Gi 권장
+            cpu: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  type: ClusterIP
+  ports:
+  - port: 32000      # 시방서 정의 포트
+    targetPort: 9000
+  selector:
+    app: sonarqube

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alphacar-project
+  namespace: apc-cicd-ns  # 시방서의 ArgoCD 위치
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/Alphacar-project/alphacar-k8s.git'
+    targetRevision: HEAD
+    path: 'k8s'           # 리포지토리 내 YAML 경로
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: alphacar   # 실제 서비스 배포 대상
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
