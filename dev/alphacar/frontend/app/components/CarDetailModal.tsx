@@ -117,7 +117,20 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
   const [allImages, setAllImages] = useState<ImageItem[]>([]);
 
   // ✅ [최종 수정] 백엔드가 보내준 'vehicleId' 필드를 직접 사용합니다.
-  const targetId = car?.vehicleId || car?._id || car?.id; 
+  // vehicleId가 객체인 경우 lineup_id를 우선 사용, 없으면 _id 사용
+  let targetId: string | undefined;
+  if (car?.vehicleId) {
+    if (typeof car.vehicleId === 'object' && car.vehicleId !== null) {
+      // vehicleId가 populate된 객체인 경우
+      targetId = (car.vehicleId as any).lineup_id || (car.vehicleId as any)._id?.toString() || (car.vehicleId as any).id?.toString();
+    } else {
+      // vehicleId가 문자열인 경우
+      targetId = String(car.vehicleId);
+    }
+  }
+  if (!targetId) {
+    targetId = car?._id?.toString() || car?.id?.toString();
+  } 
   
   const carName = car?.name || car?.vehicle_name;
   const brandName = car?.manufacturer || car?.brand_name;

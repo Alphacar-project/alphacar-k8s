@@ -157,7 +157,19 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
                     }
                     
                     // 세부 트림 목록 로드
-                    fetch(`${API_BASE}/vehicles/trims?modelId=${encodeURIComponent(foundModel._id || "")}`)
+                    // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+                    const initBaseTrim = initBaseTrimId ? baseTrimData.find((bt: BaseTrim) => bt._id === initBaseTrimId || bt.id === initBaseTrimId) : null;
+                    const initBaseTrimName = initBaseTrim?.base_trim_name || initBaseTrim?.name || "";
+                    const initModelNameForSearch = foundModel.model_name || foundModel.name || initModelName || "";
+                    const initBrandName = makers.find((m: Maker) => m._id === initMakerId)?.name || "";
+                    
+                    const queryParams = new URLSearchParams();
+                    queryParams.append('modelId', foundModel._id || "");
+                    if (initBaseTrimName) queryParams.append('baseTrimName', initBaseTrimName);
+                    if (initModelNameForSearch) queryParams.append('modelName', initModelNameForSearch);
+                    if (initBrandName) queryParams.append('brandName', initBrandName);
+                    
+                    fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`)
                       .then(handleApiResponse)
                       .then((trimData: any) => {
                         if (Array.isArray(trimData)) {
@@ -263,7 +275,7 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
   };
 
   const handleBaseTrimChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newBaseTrimId = e.target.value; // base_trim_name
+    const newBaseTrimId = e.target.value; // base_trim_name 또는 ID
     setHasUserInteracted(true);
     
     if (!newBaseTrimId || !modelId) {
@@ -277,9 +289,27 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
     setTrimId(""); setTrimName("");
     setTrims([]);
 
+    // 현재 선택된 제조사와 차종 정보 가져오기
+    const selectedModel = models.find((m: Model) => m._id === modelId);
+    const selectedMaker = makers.find((m: Maker) => m._id === makerId);
+    const modelName = selectedModel?.model_name || selectedModel?.name || "";
+    const brandName = selectedMaker?.name || "";
+    
+    // baseTrimName 찾기: baseTrims 배열에서 찾거나, 없으면 newBaseTrimId 자체를 사용
+    const foundBaseTrim = baseTrims.find((bt: BaseTrim) => 
+      (bt._id === newBaseTrimId || bt.id === newBaseTrimId || bt.name === newBaseTrimId || bt.base_trim_name === newBaseTrimId)
+    );
+    const baseTrimName = foundBaseTrim?.base_trim_name || foundBaseTrim?.name || newBaseTrimId;
+
     // 기본 트림 선택 후 세부 트림 목록 가져오기
-    // base_trim_name을 전달 (백엔드에서 base_trim_name으로 검색)
-    fetch(`${API_BASE}/vehicles/trims?modelId=${encodeURIComponent(newBaseTrimId)}`)
+    // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+    const queryParams = new URLSearchParams();
+    queryParams.append('modelId', modelId);
+    if (baseTrimName && baseTrimName !== '없음') queryParams.append('baseTrimName', baseTrimName);
+    if (modelName && modelName !== '없음') queryParams.append('modelName', modelName);
+    if (brandName && brandName !== '없음') queryParams.append('brandName', brandName);
+
+    fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`)
       .then(handleApiResponse)
       .then((data: any) => {
         if (Array.isArray(data)) {
@@ -560,7 +590,18 @@ function PersonalQuotePageContent() {
                 : null;
               
               // 4. 세부트림 목록에서 찾기
-              const trimsRes = await fetch(`${API_BASE}/vehicles/trims?modelId=${encodeURIComponent(foundModel._id || "")}`);
+              // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+              const baseTrimName = foundBaseTrim?.base_trim_name || foundBaseTrim?.name || "";
+              const modelNameForSearch = foundModel.model_name || foundModel.name || modelNameToSearch;
+              const brandNameForSearch = foundMaker.name || "";
+              
+              const queryParams = new URLSearchParams();
+              queryParams.append('modelId', foundModel._id || "");
+              if (baseTrimName) queryParams.append('baseTrimName', baseTrimName);
+              if (modelNameForSearch) queryParams.append('modelName', modelNameForSearch);
+              if (brandNameForSearch) queryParams.append('brandName', brandNameForSearch);
+              
+              const trimsRes = await fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`);
               const trimsData = await trimsRes.json();
               const foundTrim = Array.isArray(trimsData)
                 ? trimsData.find((t: Trim) => 

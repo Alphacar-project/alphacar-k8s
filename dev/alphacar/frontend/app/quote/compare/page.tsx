@@ -152,9 +152,24 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
 
     if (!newBaseTrimId || !modelId) return;
 
+    // 현재 선택된 제조사와 차종 정보 가져오기
+    const selectedModel = models.find((m: any) => m._id === modelId);
+    const selectedMaker = makers.find((m: any) => m._id === makerId);
+    const modelName = selectedModel?.model_name || selectedModel?.name || "";
+    const brandName = selectedMaker?.name || "";
+    const baseTrimName = baseTrims.find((bt: any) => 
+      (bt._id === newBaseTrimId || bt.id === newBaseTrimId || bt.name === newBaseTrimId || bt.base_trim_name === newBaseTrimId)
+    )?.base_trim_name || newBaseTrimId;
+
     // 기본 트림 선택 후 세부 트림 목록 가져오기
-    // base_trim_name을 전달 (백엔드에서 base_trim_name으로 검색)
-    fetch(`${API_BASE}/vehicles/trims?modelId=${encodeURIComponent(newBaseTrimId)}`)
+    // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+    const queryParams = new URLSearchParams();
+    queryParams.append('modelId', modelId);
+    if (baseTrimName) queryParams.append('baseTrimName', baseTrimName);
+    if (modelName) queryParams.append('modelName', modelName);
+    if (brandName) queryParams.append('brandName', brandName);
+
+    fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`)
       .then(handleApiResponse)
       .then((data) => {
         if (Array.isArray(data)) {
