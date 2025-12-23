@@ -18,6 +18,14 @@ pipeline {
                 script {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "1.0.${currentBuild.number}-${env.GIT_SHA}"
+                    
+                    // Trivy가 없을 경우 설치하는 함수
+                    sh '''
+                        if ! command -v trivy &> /dev/null; then
+                            echo "📦 Trivy 설치 중..."
+                            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                        fi
+                    '''
                 }
             }
         }
@@ -28,32 +36,28 @@ pipeline {
                     def scannerHome = tool name: 'sonar-scanner'
                     def serviceList = env.SERVICES.split(' ')
 
-                    // 서버 리소스 보호를 위해 순차 분석하되, 속도 옵션 적용
+                    // 서버 보호를 위해 순차 실행 (속도 최적화 적용)
                     for (service in serviceList) {
-                        stage("Analysis: ${service}") {
-                            echo "🔍 [${service}] 분석 시작..."
-                            
-                            // 2-1. 소스 경로 유연성 체크 (src/main/java가 없으면 서비스 루트 사용)
-                            def sonarSrc = "dev/alphacar/backend/${service}"
-                            def hasJavaSrc = sh(script: "[ -d 'dev/alphacar/backend/${service}/src/main/java' ]", returnStatus: true) == 0
-                            if (hasJavaSrc) { sonarSrc = "dev/alphacar/backend/${service}/src/main/java" }
-
-                            // 2-2. SonarQube 실행
+                        stage("Process: ${service}") {
+                            // 2-1. SonarQube 분석 (중요 소스 위주 & 캐시 사용)
+                            echo "🔍 [${service}] 소나큐브 분석 (최적화 모드)"
                             withSonarQubeEnv('SonarQube') {
                                 sh """
                                     ${scannerHome}/bin/sonar-scanner \
                                     -Dsonar.projectKey=alphacar-${service} \
                                     -Dsonar.projectName=alphacar-${service} \
-                                    -Dsonar.sources=${sonarSrc} \
+                                    -Dsonar.sources=dev/alphacar/backend/${service} \
                                     -Dsonar.host.url=http://192.168.0.170:32000 \
                                     -Dsonar.analysis.cache=true \
                                     -Dsonar.scanner.timeout=300 \
+                                    -Dsonar.inclusions=**/src/main/java/** \
                                     -Dsonar.exclusions=**/test/**,**/resources/**,**/*.xml,**/*.html,**/*.js
                                 """
                             }
 
-                            // 2-3. Trivy 보안 스캔 (소나큐브 분석 직후 실행)
-                            echo "🛡️ [${service}] Trivy 이미지 스캔 대기 중 (빌드 후 진행 가능하므로 fs 스캔 실시)"
+                            // 2-2. Trivy 소스코드 스캔 (소나큐브 바로 다음)
+                            echo "🛡️ [${service}] Trivy 보안 스캔 중..."
+                            // trivy가 /usr/local/bin에 설치되었다고 가정하거나 상대 경로 사용
                             sh "trivy fs --severity CRITICAL,HIGH --exit-code 0 dev/alphacar/backend/${service}"
                         }
                     }
@@ -61,7 +65,7 @@ pipeline {
             }
         }
 
-        stage('3. 고속 병렬 빌드 & 푸시') {
+        stage('3. 병렬 도커 빌드 & 푸시') {
             steps {
                 script {
                     def buildTasks = [:]
@@ -69,6 +73,7 @@ pipeline {
                         buildTasks["Build-${service}"] = {
                             dir("dev/alphacar/backend/${service}") {
                                 def imageTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}"
+                                echo "🐳 ${service} 빌드 시작..."
                                 sh "docker build -t ${imageTag} ."
                                 
                                 withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CRED_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
