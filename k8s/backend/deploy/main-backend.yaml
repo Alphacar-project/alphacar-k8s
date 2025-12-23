@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: main-backend
+  template:
+    metadata:
+      labels:
+        app: main-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: main-backend
+        image: 192.168.0.170:30000/alphacar/alphacar-main:1.0.32-c1d0917
+        ports:
+        - containerPort: 3002
+          name: http-main # Service와 이름을 맞추어 Istio 가시성 확보
+        env:
+        - name: PORT
+          value: "3002"
+        - name: SERVICE_NAME
+          value: "main-backend"
+
+        # [ConfigMap] alphacar-be-config 참조
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MONGO_PORT
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: REDIS_PORT
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+
+        # [Secret] alphacar-be-secret 참조
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MONGO_DB_NAME
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: JWT_SECRET
+
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: main-backend
+  ports:
+  - name: http-main # Istio 프로토콜 분석용 접두사 유지
+    port: 3002
+    targetPort: 3002
+    protocol: TCP
+  type: ClusterIP
