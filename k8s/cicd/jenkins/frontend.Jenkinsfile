@@ -35,7 +35,7 @@ pipeline {
                             baseVer = readFile('frontend/version.txt').trim()
                         }
                     } catch (e) {
-                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
+                        echo "⚠️ version.txt 없음 → 1.0 사용"
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
@@ -74,23 +74,20 @@ pipeline {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     def imageLatestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 
-                    echo "🐳 이미지 빌드 시작 (표준 모드)..."
-                    // [수정] 에러를 유발하는 DOCKER_BUILDKIT=1과 --progress=plain을 삭제함
-                    sh """
-                        docker build \
-                            -f frontend/Dockerfile \
-                            -t ${imageFullTag} \
-                            -t ${imageLatestTag} \
-                            frontend/
-                    """
+                    echo "🐳 이미지 빌드 시작 (경로 최적화)..."
+                    
+                    // [해결] frontend 폴더 내부로 진입하여 Dockerfile을 찾지 못하는 문제 해결
+                    dir('frontend') {
+                        sh "docker build -f Dockerfile -t ${imageFullTag} -t ${imageLatestTag} ."
 
-                    withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        sh """
-                            echo "${PASS}" | docker login ${HARBOR_URL} -u ${USER} --password-stdin
-                            docker push ${imageFullTag}
-                            docker push ${imageLatestTag}
-                            docker logout ${HARBOR_URL}
-                        """
+                        withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh """
+                                echo "${PASS}" | docker login ${HARBOR_URL} -u ${USER} --password-stdin
+                                docker push ${imageFullTag}
+                                docker push ${imageLatestTag}
+                                docker logout ${HARBOR_URL}
+                            """
+                        }
                     }
                 }
             }
