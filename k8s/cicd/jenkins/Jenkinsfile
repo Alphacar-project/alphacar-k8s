@@ -2,11 +2,16 @@ pipeline {
     agent any
 
     environment {
+        // 하버 및 도커 설정
         HARBOR_URL      = '192.168.0.170:30000'
         HARBOR_PROJECT  = 'alphacar'
         HARBOR_CRED_ID  = 'harbor-cred'
+
+        // 깃허브 설정 (Manifest 레포지토리)
         GIT_CREDENTIAL_ID = 'github-cred'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+
+        // 대상 서비스 목록
         SERVICES = "aichat community main mypage news quote search"
     }
 
@@ -16,10 +21,11 @@ pipeline {
                 cleanWs()
                 checkout scm
                 script {
+                    // 공통 버전 및 태그 생성
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "1.0.${currentBuild.number}-${env.GIT_SHA}"
                     
-                    // Trivy 설치 및 환경 구성
+                    // Trivy 설치 및 환경 구성 (권한 문제 방지를 위해 /tmp 활용)
                     sh '''
                         if ! command -v trivy &> /dev/null; then
                             echo "📦 Trivy 설치 진행..."
@@ -34,17 +40,18 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    // split 결과를 toList()로 변환하여 에러 방지
+                    // [에러 수정] Array를 List로 변환하여 그루비 메서드 사용 가능하게 함
                     def serviceList = env.SERVICES.split(' ').toList()
 
                     for (service in serviceList) {
                         echo "🔍 [${service}] 분석 및 보안 스캔 시작..."
                         
-                        // SonarQube (중요 소스만 검사하여 서버 부하 감소)
+                        // 2-1. SonarQube (중요 자바 소스만 분석하여 서버 부하 감소 및 캐시 활성화)
                         withSonarQubeEnv('SonarQube') {
                             sh """
                                 ${scannerHome}/bin/sonar-scanner \
                                 -Dsonar.projectKey=alphacar-${service} \
+                                -Dsonar.projectName=alphacar-${service} \
                                 -Dsonar.analysis.cache=true \
                                 -Dsonar.sources=dev/alphacar/backend/${service} \
                                 -Dsonar.inclusions=**/src/main/java/** \
@@ -54,8 +61,8 @@ pipeline {
                             """
                         }
 
-                        // Trivy 스캔 (파일 시스템 모드)
-                        echo "🛡️ [${service}] Trivy 보안 스캔..."
+                        // 2-2. Trivy 스캔 (파일 시스템 모드)
+                        echo "🛡️ [${service}] Trivy 보안 스캔 중..."
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 dev/alphacar/backend/${service} || echo 'Trivy 스캔 실패'"
                     }
                 }
@@ -65,7 +72,7 @@ pipeline {
         stage('3. 고속 분할 빌드 & 푸시') {
             steps {
                 script {
-                    // [에러 수정] Array를 List로 변환한 후 2개씩 분할
+                    // [에러 수정] List 변환 후 2개씩 분할 빌드 (파드 OOM 방지)
                     def serviceList = env.SERVICES.split(' ').toList()
                     def chunks = serviceList.collate(2) 
 
@@ -89,7 +96,7 @@ pipeline {
                                 }
                             }
                         }
-                        // 2개 단위로만 병렬 실행 (Pod OOM 방지)
+                        // 한 번에 2개 서비스씩만 병렬 실행하여 노드 리소스 보호
                         parallel buildTasks
                     }
                 }
@@ -100,22 +107,51 @@ pipeline {
             steps {
                 script {
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]] ])
-                        env.SERVICES.split(' ').each { service ->
-                            sh "sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' k8s/backend/${service}-backend.yaml"
+                        // Manifest 레포지토리 체크아웃
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+
+                        def serviceList = env.SERVICES.split(' ')
+                        for (service in serviceList) {
+                            sh """
+                                if [ -f "k8s/backend/${service}-backend.yaml" ]; then
+                                    echo "📝 업데이트: ${service}"
+                                    sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' k8s/backend/${service}-backend.yaml
+                                fi
+                            """
                         }
-                        sh """
-                            git config user.email "jenkins@alphacar.com"
-                            git config user.name "Jenkins-CI"
-                            git add .
-                            if [ -n "\$(git status --porcelain)" ]; then
-                                git commit -m "Update images to ${env.FULL_VERSION} [skip ci]"
-                                git push origin HEAD:main
-                            fi
-                        """
+
+                        // [에러 수정] 인증 정보를 포함하여 Push 실행
+                        withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                            sh """
+                                git config user.email "jenkins@alphacar.com"
+                                git config user.name "Jenkins-CI"
+                                
+                                # URL에 ID:PASS를 주입하여 인증 에러(128) 해결
+                                git remote set-url origin https://${GIT_USER}:${GIT_PASS}@github.com/Alphacar-project/alphacar-k8s.git
+                                
+                                git add .
+                                if [ -n "\$(git status --porcelain)" ]; then
+                                    git commit -m "Update images to ${env.FULL_VERSION} [skip ci]"
+                                    git push origin HEAD:main
+                                else
+                                    echo "변경사항 없음"
+                                fi
+                            """
+                        }
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            // 미사용 이미지 정리 및 워크스페이스 청소
+            sh "docker image prune -f"
+            cleanWs()
         }
     }
 }
