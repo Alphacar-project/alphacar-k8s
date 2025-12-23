@@ -13,15 +13,28 @@ spec:
       labels:
         app: sonarqube
     spec:
+      # nodeName: a-worker1  # [추가] 건강한 노드인 a-worker1에 강제 배치
       containers:
       - name: sonarqube
-        image: sonarqube:lts
+        image: sonarqube:lts-community
         ports:
         - containerPort: 9000
+        env:
+        - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
+          value: "true"
+        - name: SONAR_WEB_JAVAOPTS
+          value: "-Xmx512m -Xms512m"
+        - name: SONAR_CE_JAVAOPTS
+          value: "-Xmx512m -Xms512m"
+        - name: SONAR_ES_JAVAOPTS
+          value: "-Xmx512m -Xms512m"
         resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
           limits:
-            memory: "2Gi"  # 소나큐브는 메모리를 많이 소모하므로 2Gi 권장
-            cpu: "1"
+            memory: "2Gi"
+            cpu: "1000m"
 ---
 apiVersion: v1
 kind: Service
@@ -29,9 +42,10 @@ metadata:
   name: sonarqube
   namespace: apc-cicd-ns
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
-  - port: 32000      # 시방서 정의 포트
+  - port: 32000
     targetPort: 9000
+    nodePort: 32000  # 시방서 정의 포트
   selector:
     app: sonarqube
