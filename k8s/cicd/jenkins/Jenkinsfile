@@ -77,7 +77,7 @@ pipeline {
                         batch.each { service ->
                             actions["Build-${service}"] = {
                                 stage("Process ${service}") {
-                                    dir('dev/alphacar') {
+                                    dir("dev/alphacar/backend/${service}") {
                                         sh "docker build -f backend/${service}/Dockerfile -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION} -t ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:latest backend/"
 
                                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIAL_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -135,4 +135,19 @@ pipeline {
             cleanWs()
         }
     }
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: frontend-scaler
+  namespace: apc-fe-ns  # 프론트엔드 네임스페이스
+spec:
+  scaleTargetRef:
+    name: frontend      # Deployment 이름
+  minReplicaCount: 2    # 최소 2개 유지 (안정성)
+  maxReplicaCount: 10   # 최대 10개까지 확장
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"     # CPU 60% 도달 시 확장
 }
