@@ -22,37 +22,41 @@ pipeline {
             }
         }
 
-        stage('2. Security & Quality Analysis') {
+        stage('2. Quality & Security Analysis') {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     def serviceList = env.SERVICES.split(' ')
-                    def analysisTasks = [:]
 
+                    // 서버 리소스 보호를 위해 순차 분석하되, 속도 옵션 적용
                     for (service in serviceList) {
-                        def currentService = service
-                        analysisTasks["Analysis-${currentService}"] = {
-                            // 2-1. SonarQube: 중요 소스만, 캐시 사용
-                            echo "🔍 [${currentService}] 분석 (중요 파일 위주)"
+                        stage("Analysis: ${service}") {
+                            echo "🔍 [${service}] 분석 시작..."
+                            
+                            // 2-1. 소스 경로 유연성 체크 (src/main/java가 없으면 서비스 루트 사용)
+                            def sonarSrc = "dev/alphacar/backend/${service}"
+                            def hasJavaSrc = sh(script: "[ -d 'dev/alphacar/backend/${service}/src/main/java' ]", returnStatus: true) == 0
+                            if (hasJavaSrc) { sonarSrc = "dev/alphacar/backend/${service}/src/main/java" }
+
+                            // 2-2. SonarQube 실행
                             withSonarQubeEnv('SonarQube') {
                                 sh """
                                     ${scannerHome}/bin/sonar-scanner \
-                                    -Dsonar.projectKey=alphacar-${currentService} \
-                                    -Dsonar.analysis.cache=true \
-                                    -Dsonar.sources=dev/alphacar/backend/${currentService}/src/main/java \
+                                    -Dsonar.projectKey=alphacar-${service} \
+                                    -Dsonar.projectName=alphacar-${service} \
+                                    -Dsonar.sources=${sonarSrc} \
                                     -Dsonar.host.url=http://192.168.0.170:32000 \
-                                    -Dsonar.scanner.timeout=600 \
-                                    -Dsonar.exclusions=**/test/**,**/resources/**,**/*.xml
+                                    -Dsonar.analysis.cache=true \
+                                    -Dsonar.scanner.timeout=300 \
+                                    -Dsonar.exclusions=**/test/**,**/resources/**,**/*.xml,**/*.html,**/*.js
                                 """
                             }
-                            
-                            // 2-2. Trivy: 소스코드 취약점 스캔 (Critical/High만 표시)
-                            echo "🛡️ [${currentService}] Trivy 보안 스캔 중..."
-                            sh "trivy fs --severity CRITICAL,HIGH dev/alphacar/backend/${currentService}"
+
+                            // 2-3. Trivy 보안 스캔 (소나큐브 분석 직후 실행)
+                            echo "🛡️ [${service}] Trivy 이미지 스캔 대기 중 (빌드 후 진행 가능하므로 fs 스캔 실시)"
+                            sh "trivy fs --severity CRITICAL,HIGH --exit-code 0 dev/alphacar/backend/${service}"
                         }
                     }
-                    // 소나큐브 서버 부하 분산을 위해 2개씩 병렬 실행 (서버 사양에 따라 조정)
-                    parallel analysisTasks
                 }
             }
         }
@@ -60,26 +64,16 @@ pipeline {
         stage('3. 고속 병렬 빌드 & 푸시') {
             steps {
                 script {
-                    def serviceList = env.SERVICES.split(' ')
                     def buildTasks = [:]
-
-                    for (service in serviceList) {
-                        def currentService = service
-                        buildTasks["Build-${currentService}"] = {
-                            dir("dev/alphacar/backend/${currentService}") {
-                                def imageTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${currentService}:${env.FULL_VERSION}"
-                                def latestTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${currentService}:latest"
-
-                                echo "🐳 ${currentService} 빌드 중..."
-                                // --build-arg 등을 활용하거나 캐시 최적화
-                                sh "docker build -t ${imageTag} -t ${latestTag} ."
-
+                    env.SERVICES.split(' ').each { service ->
+                        buildTasks["Build-${service}"] = {
+                            dir("dev/alphacar/backend/${service}") {
+                                def imageTag = "${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}"
+                                sh "docker build -t ${imageTag} ."
+                                
                                 withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CRED_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                                    sh """
-                                        echo "${PASS}" | docker login ${HARBOR_URL} -u ${USER} --password-stdin
-                                        docker push ${imageTag}
-                                        docker push ${latestTag}
-                                    """
+                                    sh "echo '${PASS}' | docker login ${HARBOR_URL} -u ${USER} --password-stdin"
+                                    sh "docker push ${imageTag}"
                                 }
                             }
                         }
@@ -93,16 +87,10 @@ pipeline {
             steps {
                 script {
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM',
-                            branches: [[name: 'main']],
-                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
-                        ])
-
-                        def serviceList = env.SERVICES.split(' ')
-                        for (service in serviceList) {
+                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]] ])
+                        env.SERVICES.split(' ').each { service ->
                             sh "sed -i 's|image: .*/alphacar-${service}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/alphacar-${service}:${env.FULL_VERSION}|' k8s/backend/${service}-backend.yaml"
                         }
-
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
@@ -115,13 +103,6 @@ pipeline {
                     }
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            sh "docker image prune -f"
-            cleanWs()
         }
     }
 }
