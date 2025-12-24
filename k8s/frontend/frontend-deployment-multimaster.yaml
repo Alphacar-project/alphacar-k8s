@@ -5,6 +5,7 @@ metadata:
   namespace: apc-fe-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1  # 👈 추가: 지저분한 회색 박스 수십 개를 싹 정리합니다.
   selector:
     matchLabels:
       app: frontend
@@ -17,7 +18,8 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        image: 192.168.0.169/kdh/alphacar-frontend:2.0.10
+        image: 192.168.0.170:30000/alphacar/alphacar-frontend:latest # 👈 Harbor 주소 통일
+        imagePullPolicy: Always  # 👈 추가: 항상 새 이미지를 받아오도록 강제
         ports:
         - containerPort: 8000
           name: http
@@ -61,5 +63,5 @@ spec:
   - port: 8000
     targetPort: 8000
     protocol: TCP
+    name: http-web
   type: ClusterIP
-
