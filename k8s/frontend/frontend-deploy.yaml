@@ -5,30 +5,33 @@ metadata:
   namespace: apc-fe-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1  # 👈 회색 박스(이력)를 정리합니다.
   selector:
     matchLabels:
       app: frontend
   template:
     metadata:
       labels:
-        app: frontend # VirtualService의 destination.host와 일치해야 함
+        app: frontend
     spec:
       containers:
       - name: frontend
-        image: 192.168.0.169/kdh/frontend:latest # Harbor 이미지
+        image: 192.168.0.170:30000/alphacar/alphacar-frontend:latest # 👈 Harbor 주소로 통일
+        imagePullPolicy: Always  # 👈 이미지를 항상 새로 받아오도록 강제
         ports:
-        - containerPort: 8000
+        - containerPort: 3000
+          name: http-web
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend # VirtualService에서 부르는 이름
+  name: frontend
   namespace: apc-fe-ns
 spec:
-  type: ClusterIP # 이제 NodePort는 안 씁니다!
+  type: ClusterIP
   ports:
   - port: 8000
-    targetPort: 8000
+    targetPort: 3000
     name: http-web
   selector:
     app: frontend

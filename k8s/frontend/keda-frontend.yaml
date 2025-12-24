@@ -6,7 +6,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: frontend      # Deployment 이름
-  minReplicaCount: 2    # 최소 2개 유지 (안정성)
+  minReplicaCount: 1    # 최소 2개 유지 (안정성)
   maxReplicaCount: 10   # 최대 10개까지 확장
   triggers:
     - type: cpu

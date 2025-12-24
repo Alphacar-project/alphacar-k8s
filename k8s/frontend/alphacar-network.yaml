@@ -7,8 +7,8 @@ spec:
   hosts:
   - "alphacar.cloud"
   gateways:
-    #- istio-system/alphacar-gateway
-    - apc-gateway
+    - istio-system/alphacar-gateway
+    #- apc-gateway
   http:
   - match:
     - uri:
