@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: community-backend
@@ -18,6 +19,7 @@ spec:
       containers:
       - name: community-backend
         image: 192.168.0.170:30000/alphacar/alphacar-community:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
         - containerPort: 3005
           name: http-community # Istio 인식용 포트 이름
