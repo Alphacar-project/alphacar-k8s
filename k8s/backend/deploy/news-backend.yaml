@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: news-backend
@@ -16,17 +17,17 @@ spec:
       imagePullSecrets:
       - name: harbor-registry-secret
       containers:
-      - name: drive-backend
-        image: 192.168.0.169/alphacar-project/alphacar-drive:1.0.0
+      - name: news-backend
+        image: 192.168.0.170:30000/alphacar/alphacar-news:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
-        - containerPort: 3008 # 환경변수 PORT와 일치시킴
+        - containerPort: 3003
           name: http-news
         env:
         - name: PORT
-          value: "3008"
+          value: "3003"
         - name: SERVICE_NAME
           value: "news-backend"
-        # [ConfigMap] alphacar-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -42,7 +43,6 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MONGO_PORT
-        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -75,8 +75,8 @@ spec:
   selector:
     app: news-backend
   ports:
-  - name: http-news # Istio 프로토콜 분석용 접두사
-    port: 3008      # VirtualService 설정과 맞춤
-    targetPort: 3008
+  - port: 3003
+    targetPort: 3003
     protocol: TCP
+    name: http-news
   type: ClusterIP

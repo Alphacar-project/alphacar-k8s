@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: search-backend
@@ -18,16 +19,15 @@ spec:
       containers:
       - name: search-backend
         image: 192.168.0.170:30000/alphacar/alphacar-search:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
-        - containerPort: 3007
-          name: http-search # 서비스 포트 이름과 통일
+        - containerPort: 3005
+          name: http-search
         env:
         - name: PORT
-          value: "3007"
+          value: "3005"
         - name: SERVICE_NAME
           value: "search-backend"
-
-        # [ConfigMap] alphacar-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -43,8 +43,6 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MONGO_PORT
-
-        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -60,15 +58,6 @@ spec:
             secretKeyRef:
               name: alphacar-be-secret
               key: MONGO_DB_NAME
-
-        # [변수 조합] 소스 코드에서 URI가 직접 필요한 경우를 대비
-        - name: MONGO_URI
-          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
-        - name: MONGODB_URI
-          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
-
-        command: ["sh", "-c"]
-        args: ["node /app/search/dist/main.js"]
         resources:
           requests:
             memory: "256Mi"
@@ -86,8 +75,8 @@ spec:
   selector:
     app: search-backend
   ports:
-  - name: http-search
-    port: 3007
-    targetPort: 3007
+  - port: 3005
+    targetPort: 3005
     protocol: TCP
+    name: http-search
   type: ClusterIP

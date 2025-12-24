@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: mypage-backend
@@ -18,19 +19,17 @@ spec:
       containers:
       - name: mypage-backend
         image: 192.168.0.170:30000/alphacar/alphacar-mypage:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
         - containerPort: 3006
-          name: http-mypage # Istio 인식을 위한 포트 이름
+          name: http-mypage
         env:
         - name: PORT
           value: "3006"
         - name: SERVICE_NAME
           value: "mypage-backend"
-        # BASE_URL은 유지하되, 나중에 Istio Gateway 주소로 변경이 필요할 수 있습니다.
         - name: BASE_URL
           value: "https://192.168.56.200:31008"
-        
-        # [ConfigMap] alphacar-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -56,8 +55,6 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MARIADB_PORT
-
-        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -93,7 +90,6 @@ spec:
             secretKeyRef:
               name: alphacar-be-secret
               key: JWT_SECRET
-
         resources:
           requests:
             memory: "256Mi"
@@ -114,5 +110,5 @@ spec:
   - port: 3006
     targetPort: 3006
     protocol: TCP
-    name: http-mypage # Istio 프로토콜 분석용 접두사 추가
+    name: http-mypage
   type: ClusterIP

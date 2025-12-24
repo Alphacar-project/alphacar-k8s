@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: main-backend
@@ -18,71 +19,52 @@ spec:
       containers:
       - name: main-backend
         image: 192.168.0.170:30000/alphacar/alphacar-main:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
-        - containerPort: 3002
-          name: http-main # Service와 이름을 맞추어 Istio 가시성 확보
+        - containerPort: 3000
+          name: http-main
         env:
         - name: PORT
-          value: "3002"
+          value: "3000"
         - name: SERVICE_NAME
           value: "main-backend"
-
-        # [ConfigMap] alphacar-be-config 참조
-        - name: DATABASE_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: MONGO_HOST
-        - name: DATABASE_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: MONGO_PORT
-        - name: REDIS_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: REDIS_HOST
-        - name: REDIS_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: REDIS_PORT
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
               name: alphacar-be-config
               key: OTEL_EXPORTER_OTLP_ENDPOINT
-
-        # [Secret] alphacar-be-secret 참조
-        - name: DATABASE_USER
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_PORT
+        - name: MARIADB_USERNAME
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MONGO_USER
-        - name: DATABASE_PASSWORD
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MONGO_PASS
-        - name: DATABASE_NAME
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
           valueFrom:
             secretKeyRef:
               name: alphacar-be-secret
-              key: MONGO_DB_NAME
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: alphacar-be-secret
-              key: JWT_SECRET
-
+              key: MARIADB_DB_NAME
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
             memory: "256Mi"
-            cpu: "300m"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
@@ -93,8 +75,8 @@ spec:
   selector:
     app: main-backend
   ports:
-  - name: http-main # Istio 프로토콜 분석용 접두사 유지
-    port: 3002
-    targetPort: 3002
+  - port: 3000
+    targetPort: 3000
     protocol: TCP
+    name: http-main
   type: ClusterIP

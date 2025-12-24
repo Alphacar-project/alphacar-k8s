@@ -5,6 +5,7 @@ metadata:
   namespace: apc-be-ns
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: quote-backend
@@ -18,16 +19,20 @@ spec:
       containers:
       - name: quote-backend
         image: 192.168.0.170:30000/alphacar/alphacar-quote:1.0.32-c1d0917
+        imagePullPolicy: Always
         ports:
-        - containerPort: 3003
-          name: http-quote # Istio 인식을 위한 포트 이름
+        - containerPort: 3001
+          name: http-quote
         env:
         - name: PORT
-          value: "3003"
+          value: "3001"
         - name: SERVICE_NAME
           value: "quote-backend"
-
-        # [ConfigMap] alphacar-be-config 참조
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
         - name: DATABASE_HOST
           valueFrom:
             configMapKeyRef:
@@ -38,18 +43,6 @@ spec:
             configMapKeyRef:
               name: alphacar-be-config
               key: MONGO_PORT
-        - name: ESTIMATE_DB_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: MONGO_HOST
-        - name: ESTIMATE_DB_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: alphacar-be-config
-              key: MONGO_PORT
-
-        # [Secret] alphacar-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -65,42 +58,13 @@ spec:
             secretKeyRef:
               name: alphacar-be-secret
               key: MONGO_DB_NAME
-        - name: ESTIMATE_DB_USER
-          valueFrom:
-            secretKeyRef:
-              name: alphacar-be-secret
-              key: MONGO_USER
-        - name: ESTIMATE_DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: alphacar-be-secret
-              key: MONGO_PASS
-        - name: ESTIMATE_DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: alphacar-be-secret
-              key: MONGO_DB_NAME
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: alphacar-be-secret
-              key: JWT_SECRET
-
-        # [참고] 기존 조합형 URI 유지
-        - name: MONGO_URI
-          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
-        - name: MONGODB_URI
-          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
-        - name: ESTIMATE_MONGO_URI
-          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
-
         resources:
           requests:
-            memory: "512Mi"
+            memory: "256Mi"
             cpu: "200m"
           limits:
-            memory: "1Gi"
-            cpu: "1000m"
+            memory: "512Mi"
+            cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
@@ -111,8 +75,8 @@ spec:
   selector:
     app: quote-backend
   ports:
-  - port: 3003
-    targetPort: 3003
+  - port: 3001
+    targetPort: 3001
     protocol: TCP
-    name: http-quote # Istio 프로토콜 분석용 접두사 추가
+    name: http-quote
   type: ClusterIP
