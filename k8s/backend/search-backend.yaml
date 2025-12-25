@@ -13,6 +13,7 @@ spec:
       labels:
         app: search-backend
     spec:
+      serviceAccountName: search-backend-sa
       imagePullSecrets:
       - name: harbor-registry-secret
       containers:
@@ -27,38 +28,38 @@ spec:
         - name: SERVICE_NAME
           value: "search-backend"
 
-        # [ConfigMap] alphacar-be-config 참조
+        # [ConfigMap] apc-be-config 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: OTEL_EXPORTER_OTLP_ENDPOINT
         - name: DATABASE_HOST
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MONGO_HOST
         - name: DATABASE_PORT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MONGO_PORT
 
-        # [Secret] alphacar-be-secret 참조
+        # [Secret] apc-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_USER
         - name: DATABASE_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_PASS
         - name: DATABASE_NAME
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_DB_NAME
 
         # [변수 조합] 소스 코드에서 URI가 직접 필요한 경우를 대비
@@ -68,7 +69,7 @@ spec:
           value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
 
         command: ["sh", "-c"]
-        args: ["node /app/search/dist/main.js"]
+        args: ["node /app/dist/main.js"]
         resources:
           requests:
             memory: "256Mi"

@@ -56,6 +56,9 @@ export class AppModule implements NestModule {
         console.log(`Method: ${req.method}`);
         console.log(`Original URL: ${req.originalUrl}`); // 사용자가 보낸 원본 URL
         console.log(`Path: ${req.path}`);       // 실제 처리되는 경로
+        console.log(`Base URL: ${req.baseUrl}`); // Base URL
+        console.log(`URL: ${req.url}`);         // URL
+        console.log(`Headers Host: ${req.headers.host}`); // Host 헤더
         console.log(`================================\n`);
         next();
       })

@@ -13,11 +13,12 @@ spec:
       labels:
         app: main-backend
     spec:
+      serviceAccountName: main-backend-sa
       imagePullSecrets:
       - name: harbor-registry-secret
       containers:
       - name: main-backend
-        image: 192.168.0.170:30000/alphacar/alphacar-main:1.0.32-c1d0917
+        image: 192.168.0.170:30000/alphacar/alphacar-main:3.1.5
         ports:
         - containerPort: 3002
           name: http-main # Service와 이름을 맞추어 Istio 가시성 확보
@@ -27,62 +28,80 @@ spec:
         - name: SERVICE_NAME
           value: "main-backend"
 
-        # [ConfigMap] alphacar-be-config 참조
+        # [ConfigMap] apc-be-config 참조
         - name: DATABASE_HOST
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MONGO_HOST
         - name: DATABASE_PORT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MONGO_PORT
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: REDIS_HOST
         - name: REDIS_PORT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: REDIS_PORT
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: OTEL_EXPORTER_OTLP_ENDPOINT
 
-        # [Secret] alphacar-be-secret 참조
+        # [Secret] apc-be-secret 참조
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_USER
         - name: DATABASE_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_PASS
         - name: DATABASE_NAME
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MONGO_DB_NAME
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: JWT_SECRET
 
+        command: ["node"]
+        args: ["/app/dist/src/main.js"]
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           requests:
             memory: "128Mi"
-            cpu: "100m"
+            cpu: "200m"
           limits:
             memory: "256Mi"
-            cpu: "300m"
+            cpu: "1"
 ---
 apiVersion: v1
 kind: Service

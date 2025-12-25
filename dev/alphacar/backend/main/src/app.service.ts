@@ -358,15 +358,56 @@ export class AppService {
 
   // 리뷰 분석 데이터 조회
   async getReviewAnalysis(vehicleName: string) {
-    if (!vehicleName) return null;
+    if (!vehicleName) {
+      console.log('[AppService] 리뷰 분석: vehicleName이 없습니다.');
+      return null;
+    }
+    
+    console.log(`[AppService] 리뷰 분석 시작 - 입력 vehicleName: "${vehicleName}"`);
     
     try {
-      const analysis = await this.reviewAnalysisModel.findOne({ 
+      // 1. 정확한 vehicle_name으로 먼저 검색
+      console.log(`[AppService] 1단계: 정확 일치 검색 - "${vehicleName}"`);
+      let analysis = await this.reviewAnalysisModel.findOne({ 
         vehicle_name: vehicleName 
       }).lean().exec();
       
-      return analysis;
+      if (analysis) {
+        console.log(`[AppService] ✅ 정확 일치로 데이터 찾음: ${analysis.vehicle_name}`);
+        return analysis;
+      }
+      
+      // 2. 정확 일치 실패 시 부분 일치로 검색 (대소문자 무시)
+      console.log(`[AppService] 2단계: 부분 일치 검색 (대소문자 무시) - "${vehicleName}"`);
+      const escapedName = vehicleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      analysis = await this.reviewAnalysisModel.findOne({ 
+        vehicle_name: { $regex: escapedName, $options: 'i' }
+      }).lean().exec();
+      
+      if (analysis) {
+        console.log(`[AppService] ✅ 부분 일치로 데이터 찾음: ${analysis.vehicle_name}`);
+        return analysis;
+      }
+      
+      // 3. 브랜드명 제거 후 검색 (예: "[현대] 그랜저" -> "그랜저")
+      const modelNameOnly = vehicleName.replace(/\[[^\]]+\]\s*/, '').trim();
+      if (modelNameOnly && modelNameOnly !== vehicleName) {
+        console.log(`[AppService] 3단계: 브랜드명 제거 후 검색 - "${modelNameOnly}" (원본: "${vehicleName}")`);
+        const escapedModelName = modelNameOnly.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        analysis = await this.reviewAnalysisModel.findOne({ 
+          vehicle_name: { $regex: escapedModelName, $options: 'i' }
+        }).lean().exec();
+        
+        if (analysis) {
+          console.log(`[AppService] ✅ 브랜드명 제거 후 데이터 찾음: ${analysis.vehicle_name}`);
+          return analysis;
+        }
+      }
+      
+      console.log(`[AppService] ❌ 리뷰 분석 데이터를 찾을 수 없음: "${vehicleName}"`);
+      return null;
     } catch (error) {
+      console.error('[AppService] 리뷰 분석 조회 에러:', error);
       return null;
     }
   }

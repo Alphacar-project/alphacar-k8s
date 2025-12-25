@@ -16,7 +16,13 @@ export class RedisController {
   // 2. 개수 조회: GET /api/history/count
   @Get('count')
   async getCount(@Query('userId') userId: string) {
-    const count = await this.redisService.getHistoryCount(userId);
-    return { count };
+    try {
+      const count = await this.redisService.getHistoryCount(userId);
+      return { count };
+    } catch (error) {
+      console.error('[RedisController] Error getting history count:', error);
+      // Redis 에러 시 0 반환 (500 에러 방지)
+      return { count: 0 };
+    }
   }
 }

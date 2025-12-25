@@ -5,7 +5,7 @@ metadata:
   namespace: apc-fe-ns
 spec:
   gateways:
-  - istio-system/alphacar-gateway
+  - istio-system/apc-gateway
   hosts:
   - alphacar.cloud
   - www.alphacar.cloud
@@ -22,31 +22,193 @@ spec:
         port:
           number: 4000
 
-  # [2] Quote Backend (기존 유지)
+  # [1-0] MyPage Backend - Auth (다른 /api/ 규칙보다 먼저 매칭)
   - match:
     - uri:
-        prefix: /api/vehicles
+        prefix: /api/auth
+    rewrite:
+      uri: /auth
+    route:
+    - destination:
+        host: mypage-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3006
+          
+  # [1-0-1] MyPage Backend - API (다른 /api/ 규칙보다 먼저 매칭)
+  - match:
     - uri:
-        prefix: /api/estimate
+        prefix: /api/mypage
+    rewrite:
+      uri: /mypage
+    route:
+    - destination:
+        host: mypage-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3006
+
+  # [1-1] Main Backend - Vehicles 특정 경로 (Quote Backend보다 먼저 매칭)
+  # /api/vehicles/makers, /api/vehicles/models 등은 main-backend로 라우팅
+  - match:
     - uri:
-        prefix: /api/quote
+        prefix: /api/vehicles/makers
+    rewrite:
+      uri: /makers
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/vehicles/models
+    rewrite:
+      uri: /models
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/vehicles/base-trims
+    rewrite:
+      uri: /base-trims
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/vehicles/trims
+    rewrite:
+      uri: /trims
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+
+  # [1-1-1] Quote Backend - Vehicles Detail (더 구체적인 경로를 먼저 매칭)
+  # quote-backend는 setGlobalPrefix('api')를 사용하므로 /api prefix 유지
+  - match:
+    - uri:
+        prefix: /api/vehicles/detail
+    # rewrite 제거: /api/vehicles/detail 그대로 전달
     route:
     - destination:
         host: quote-backend.apc-be-ns.svc.cluster.local
         port:
           number: 3003
 
-  # [3] Community Backend (기존 유지)
+  # [1-1-2] Quote Backend - Vehicles Compare Data (더 구체적인 경로를 먼저 매칭)
+  # quote-backend는 setGlobalPrefix('api')를 사용하므로 /api prefix 유지
   - match:
     - uri:
-        prefix: /api/community
-    rewrite:
-      uri: /community
+        prefix: /api/vehicles/compare-data
+    # rewrite 제거: /api/vehicles/compare-data 그대로 전달
     route:
     - destination:
-        host: community-backend.apc-be-ns.svc.cluster.local
+        host: quote-backend.apc-be-ns.svc.cluster.local
         port:
-          number: 3005
+          number: 3003
+
+  # [2-0] Main Backend - 핵심 API (우선순위 높임)
+  # /api/sales, /api/brands, /api/main, /api/history, /api/favorites 등
+  - match:
+    - uri:
+        prefix: /api/sales
+    rewrite:
+      uri: /sales
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/brands
+    rewrite:
+      uri: /brands
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/main
+    rewrite:
+      uri: /main
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/history
+    rewrite:
+      uri: /history
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/favorites
+    rewrite:
+      uri: /favorites
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+
+  # [2] Quote Backend (수정됨!)
+  # quote-backend는 setGlobalPrefix('api')를 사용하므로 /api prefix 유지
+  # /api/vehicles/detail, /api/vehicles/compare-data는 위에서 이미 처리됨
+  # 나머지 /api/vehicles 경로는 quote-backend로 (rewrite 없이 /api/vehicles 그대로 전달)
+  - match:
+    - uri:
+        prefix: /api/vehicles
+    # rewrite 제거: setGlobalPrefix('api') 사용하므로 /api/vehicles 그대로 전달
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+  - match:
+    - uri:
+        prefix: /api/estimate
+    # rewrite 제거: setGlobalPrefix('api') 사용하므로 /api/estimate 그대로 전달
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+  - match:
+    - uri:
+        prefix: /api/quote
+    # rewrite 제거: setGlobalPrefix('api') 사용하므로 /api/quote 그대로 전달
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+
+  # [3] Community Backend (주석 처리 - Pod/Service 없음)
+  # - match:
+  #   - uri:
+  #       prefix: /api/community
+  #   rewrite:
+  #     uri: /community
+  #   route:
+  #   - destination:
+  #       host: community-backend.apc-be-ns.svc.cluster.local
+  #       port:
+  #         number: 3005
 
   # [4] Search Backend (기존 유지)
   - match:
@@ -60,39 +222,19 @@ spec:
         port:
           number: 3007
 
-  # [5] News Backend (기존 유지)
+  # [5] News Backend (수정됨!)
+  # 백엔드 컨트롤러는 @Controller('drive')를 사용하므로 /drive로 rewrite
   - match:
     - uri:
         prefix: /api/news
     rewrite:
-      uri: /news
+      uri: /drive
     route:
     - destination:
         host: news-backend.apc-be-ns.svc.cluster.local
         port:
           number: 3008
 
-  # [6] MyPage Backend - Auth (기존 유지)
-  - match:
-    - uri:
-        prefix: /auth/
-    route:
-    - destination:
-        host: mypage-backend.apc-be-ns.svc.cluster.local
-        port:
-          number: 3006
-          
-  # [7] MyPage Backend - API (기존 유지)
-  - match:
-    - uri:
-        prefix: /api/mypage
-    rewrite:
-      uri: /mypage
-    route:
-    - destination:
-        host: mypage-backend.apc-be-ns.svc.cluster.local
-        port:
-          number: 3006
   # [추가됨] Monitoring Frontend
   - match:
     - uri:
@@ -119,19 +261,186 @@ spec:
         port:
           number: 5000
 
-  # [8] Main Backend (수정됨!)
-  # - 위치 변경: 다른 API(검색, 뉴스 등)를 가리지 않도록 API 리스트의 가장 아래로 내렸습니다.
-  # - 규칙 수정: 복잡한 Regex 대신 안전한 Prefix를 사용하여 /api/... -> /... 로 전달합니다.
+  # [8] Main Backend - 추가 경로 (나머지)
+  # 위에서 처리하지 않은 main-backend 경로들
   - match:
     - uri:
-        prefix: /api/
+        prefix: /api/recent-views
     rewrite:
-      uri: /
+      uri: /recent-views
     route:
     - destination:
         host: main-backend.apc-be-ns.svc.cluster.local
         port:
           number: 3002
+  - match:
+    - uri:
+        prefix: /api/log-view
+    rewrite:
+      uri: /log-view
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/cars
+    rewrite:
+      uri: /cars
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /api/review-analysis
+    rewrite:
+      uri: /review-analysis
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+
+  # [8-0] Main Backend - 직접 경로 (클라이언트 사이드 요청용)
+  # /main, /brands, /sales, /history 등
+  - match:
+    - uri:
+        prefix: /main
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /brands
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /sales
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /history
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /favorites
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /recent-views
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /cars
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /review-analysis
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+
+  # [8-1] Quote Backend - 직접 경로 (클라이언트 사이드 요청용)
+  # /vehicles, /estimate, /quote 등
+  # 주의: /vehicles/makers, /vehicles/models 등은 main-backend로 가야 하므로 더 구체적인 경로를 먼저 매칭
+  - match:
+    - uri:
+        prefix: /vehicles/makers
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /vehicles/models
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /vehicles/base-trims
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /vehicles/trims
+    route:
+    - destination:
+        host: main-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /vehicles
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+  - match:
+    - uri:
+        prefix: /estimate
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+  # /quote는 Next.js 페이지 경로이므로 제거
+  # API 호출은 /api/quote로 처리하거나, 더 구체적인 경로 사용
+  # /quote/save, /quote/init 등 구체적인 API 경로만 라우팅
+  - match:
+    - uri:
+        prefix: /quote/save
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
+  - match:
+    - uri:
+        prefix: /quote/init
+    route:
+    - destination:
+        host: quote-backend.apc-be-ns.svc.cluster.local
+        port:
+          number: 3003
 
   # [9] Frontend (기존 유지)
   - match:

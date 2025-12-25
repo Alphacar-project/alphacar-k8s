@@ -35,7 +35,7 @@ async function bootstrap() {
   await app.listen(3003, '0.0.0.0', () => {
       console.log(`\n\n[SERVER START] ${serviceName} listening on http://0.0.0.0:3003`);
       console.log(`[SERVER INFO] Global Prefix: /api`);
-      console.log(`[SERVER TEST] HTTP URL: http://192.168.0.160.nip.io:3003/api/test-log`);
+      console.log(`[SERVER TEST] HTTP URL: https://alphacar.cloud:31443/api/quote/test-log`);
   });
 }
 bootstrap();

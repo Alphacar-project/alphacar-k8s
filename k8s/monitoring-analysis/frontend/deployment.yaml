@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: 192.168.0.169/bh/monitoring-analysis-frontend:1.0.0
+        image: 192.168.0.170:30000/aiobsv/monitoring-analysis-frontend:latest
         ports:
         - containerPort: 80
           name: http

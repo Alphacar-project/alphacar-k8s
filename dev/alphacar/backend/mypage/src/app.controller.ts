@@ -21,14 +21,22 @@ export class MockAuthGuard implements CanActivate {
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
 
-        // 🚨 토큰 문자열 자체를 socialId로 간주하여 동적으로 사용자 식별
-        const dynamicSocialId = token;
-
-        // 🚨 [로그 추가] 추출된 Social ID 확인
-        console.log(`[BE LOG 4] Extracted Social ID: ${dynamicSocialId}`);	
-        
-        request.user = { socialId: dynamicSocialId };
-        return true;
+        try {
+          // ✅ JWT 토큰 디코딩하여 socialId 추출
+          const decoded = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+          const socialId = decoded.sub; // JWT의 sub 필드에 socialId가 저장됨
+          
+          // 🚨 [로그 추가] 추출된 Social ID 확인
+          console.log(`[BE LOG 4] Extracted Social ID (from JWT sub): ${socialId}`);	
+          
+          request.user = { socialId };
+          return true;
+        } catch (e) {
+          // ✅ 디코딩 실패 시 토큰 전체를 socialId로 사용 (2.0.1 호환성)
+          console.log(`[BE LOG 4] JWT decode failed, using token as socialId: ${token.substring(0, 20)}...`);
+          request.user = { socialId: token };
+          return true;
+        }
     }
     
     // 토큰이 없으면 로그인되지 않은 것으로 간주

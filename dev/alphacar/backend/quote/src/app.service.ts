@@ -377,7 +377,19 @@ export class AppService {
             }
 
             let trimData: any = null;
-            if (vehicle.trims) {
+            let isVehicleLevelId = false; // 차량 레벨 ID로 찾았는지 여부
+            
+            // 차량 레벨 lineup_id로 찾았는지 확인 (311-321라인에서 찾은 경우)
+            if (/^\d+$/.test(decodedId)) {
+                const numericId = parseInt(decodedId, 10);
+                const numericIdStr = decodedId;
+                // vehicle의 lineup_id와 일치하면 차량 레벨 ID로 찾은 것
+                if (vehicle.lineup_id === numericIdStr || vehicle.lineup_id === numericId) {
+                    isVehicleLevelId = true;
+                }
+            }
+            
+            if (vehicle.trims && Array.isArray(vehicle.trims) && vehicle.trims.length > 0) {
                 // 1. _id로 정확히 매칭
                 trimData = vehicle.trims.find((t: any) => 
                     (t._id && t._id.toString() === decodedId.toString())
@@ -413,12 +425,18 @@ export class AppService {
             }
             
             // 4. 이름으로 매칭 (Fallback)
-            if (!trimData && vehicle.trims) {
+            if (!trimData && vehicle.trims && Array.isArray(vehicle.trims)) {
                 const decodedTrimName = decodedId.split(':')[0].trim(); // "트렌디 A/T:1" 형식 처리
                 trimData = vehicle.trims.find((t: any) => 
                     t.trim_name === decodedTrimName || t.trim_name === decodedId || 
                     t.name === decodedTrimName || t.name === decodedId
                 );
+            }
+            
+            // 5. 차량 레벨 ID로 찾았는데 트림을 못 찾은 경우, 첫 번째 트림을 자동 선택
+            if (!trimData && isVehicleLevelId && vehicle.trims && Array.isArray(vehicle.trims) && vehicle.trims.length > 0) {
+                trimData = vehicle.trims[0];
+                console.log(`[getTrimDetail] 차량 레벨 ID(${decodedId})로 찾았지만 트림을 못 찾아 첫 번째 트림(${trimData.trim_name || trimData.name})을 자동 선택합니다.`);
             }
             
             if (!trimData) {
@@ -434,6 +452,7 @@ export class AppService {
                 model_name: vehicle.vehicle_name,
                 manufacturer: vehicle.brand_name,
                 image_url: vehicle.main_image,
+                main_image: vehicle.main_image, // 비교 견적 코드와 일치하도록 추가
                 exterior_images: Array.isArray(vehicle.exterior_images) ? vehicle.exterior_images.slice(0, 4) : [],
                 interior_images: Array.isArray(vehicle.interior_images) ? vehicle.interior_images.slice(0, 4) : [],
                 all_exterior_images: vehicle.exterior_images || [],
@@ -442,7 +461,8 @@ export class AppService {
                     color_images: vehicle.color_images.slice(0, 4),
                     all_color_images: vehicle.color_images
                 } : {}),
-                options: trimData.options || []
+                options: trimData.options || [],
+                selectedTrimSpecs: trimData.specifications || null // 비교 견적 코드와 일치하도록 추가
             };
         } catch (e) {
             if (e instanceof NotFoundException) throw e;

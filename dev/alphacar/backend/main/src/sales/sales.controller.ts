@@ -19,6 +19,9 @@ export class SalesController {
   // (기존 GET 방식 유지)
   @Get('rankings')
   async getRankings() {
-    return this.salesService.getLatestRankings();
+    console.log('[GET /sales/rankings] ✅ 판매 순위 요청 받음 - 컨트롤러 도달 성공');
+    const result = await this.salesService.getLatestRankings();
+    console.log('[GET /sales/rankings] ✅ 판매 순위 반환 완료');
+    return result;
   }
 }

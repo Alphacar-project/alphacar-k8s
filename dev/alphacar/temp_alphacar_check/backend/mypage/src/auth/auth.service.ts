@@ -17,14 +17,20 @@ export class AuthService {
   ) {}
 
   // 🟡 카카오 로그인
-  async kakaoLogin(code: string) {
+  async kakaoLogin(code: string, redirectUri?: string) {
     const kakaoTokenUrl = 'https://kauth.kakao.com/oauth/token';
     const params = new URLSearchParams();
     params.append('grant_type', 'authorization_code');
     params.append('client_id', '342d0463be260fc289926a0c63c4badc');
     
-    // ✅ 카카오는 nip.io 주소 사용 (프론트와 일치해야 함)
-    params.append('redirect_uri', 'https://192.168.0.160.nip.io:8000/mypage');
+    // ✅ 프론트엔드에서 전달한 redirect_uri 사용, 없으면 기본값
+    let finalRedirectUri = redirectUri || 'https://alphacar.cloud/mypage';
+    if (finalRedirectUri) {
+      // 포트 번호 제거 (예: https://alphacar.cloud:31443/mypage -> https://alphacar.cloud/mypage)
+      finalRedirectUri = finalRedirectUri.replace(/:\d+(\/|$)/, '$1');
+    }
+    
+    params.append('redirect_uri', finalRedirectUri);
     params.append('code', code);
 
     let accessToken = '';
@@ -35,9 +41,16 @@ export class AuthService {
         }),
       );
       accessToken = response.data.access_token;
-    } catch (e) {
-      this.logger.error('카카오 토큰 발급 실패', e.response?.data);
-      throw new BadRequestException('카카오 토큰 발급 실패');
+    } catch (e: any) {
+      this.logger.error('카카오 토큰 발급 실패');
+      this.logger.error(`  - HTTP Status: ${e.response?.status || 'N/A'}`);
+      this.logger.error(`  - 카카오 API 응답: ${JSON.stringify(e.response?.data || e.message, null, 2)}`);
+      this.logger.error(`  - 사용한 redirect_uri: ${finalRedirectUri}`);
+      throw new BadRequestException({
+        message: '카카오 토큰 발급 실패',
+        error: e.response?.data || { error: e.message },
+        statusCode: 400,
+      });
     }
 
     const userInfoUrl = 'https://kapi.kakao.com/v2/user/me';

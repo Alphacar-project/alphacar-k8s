@@ -22,8 +22,10 @@ export class AuthController {
 
   // ✅ 2. 카카오 로그인 콜백 처리 (POST /auth/kakao-login)
   @Post('kakao-login')
-  async kakaoLoginCallback(@Body('code') code: string) {
-    return this.authService.kakaoLogin(code);
+  async kakaoLoginCallback(@Body() body: any) {
+    const code = body?.code;
+    const redirectUri = body?.redirect_uri;
+    return this.authService.kakaoLogin(code, redirectUri);
   }
 
   // ✅ [추가] 구글 로그인 (이게 없어서 404가 떴던 겁니다!)

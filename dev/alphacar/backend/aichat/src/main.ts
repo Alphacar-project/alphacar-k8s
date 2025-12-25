@@ -13,13 +13,15 @@ async function bootstrap() {
   // 이미 위에서 Tracing이 켜졌으므로 여기서는 앱 생성만 하면 됩니다.
   const app = await NestFactory.create(AppModule);
 
-  // ✅ CORS 설정 (ngrok 도메인 포함)
+  // ✅ CORS 설정 (현재 환경: alphacar.cloud)
   app.enableCors({
     origin: [
-      'https://192.168.0.160.nip.io:8000',
+      'https://alphacar.cloud',
+      'https://www.alphacar.cloud',
+      /^https:\/\/alphacar\.cloud(:[0-9]+)?$/,  // alphacar.cloud (포트 포함)
+      /^https:\/\/www\.alphacar\.cloud(:[0-9]+)?$/,  // www.alphacar.cloud (포트 포함)
       'http://localhost:8000',
       'http://127.0.0.1:8000',
-      'https://192.168.56.200:31008',
       /^https:\/\/.*\.ngrok-free\.dev$/,  // 모든 ngrok 도메인 허용
       /^https:\/\/.*\.ngrok\.io$/,        // ngrok.io 도메인도 허용
     ],

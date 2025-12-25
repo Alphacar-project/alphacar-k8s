@@ -27,13 +27,22 @@ export class AppController {
     @Query('userId') userId: string = 'guest_id',
     @Query('brand') brand?: string
   ) {
+    console.log('[GET /main] ✅ 메인 데이터 요청 받음 - 컨트롤러 도달 성공');
     // (1) 서비스에서 차량 목록 가져오기 (브랜드 필터링 지원)
     const carList = await this.appService.getCarList(brand);
 
-    // (2) Redis에서 최근 본 차량 ID 목록 가져오기
-    const recentViewIds = await this.redisService.getRecentViews(userId);
+    // (2) Redis에서 최근 본 차량 ID 목록 가져오기 (에러 처리 추가)
+    let recentViewIds: string[] = [];
+    try {
+      recentViewIds = await this.redisService.getRecentViews(userId);
+    } catch (error) {
+      console.error('[AppController] Redis 에러 (최근 본 차량 조회 실패):', error);
+      // Redis 에러가 발생해도 차량 목록은 정상 반환
+      recentViewIds = [];
+    }
 
     // (3) 종합 데이터 반환 (프론트엔드 MainData 타입과 일치)
+    console.log('[GET /main] ✅ 메인 데이터 반환 완료');
     return {
       welcomeMessage: 'Welcome to AlphaCar Home',
       searchBar: {
@@ -85,9 +94,9 @@ export class AppController {
   @Get('brands')
   async getBrands() {
     try {
-      console.log('[GET /brands] 브랜드 목록 요청 받음');
+      console.log('[GET /brands] ✅ 브랜드 목록 요청 받음 - 컨트롤러 도달 성공');
       const brands = await this.appService.getBrandsWithLogo();
-      console.log(`[GET /brands] 브랜드 ${brands.length}개 반환`);
+      console.log(`[GET /brands] ✅ 브랜드 ${brands.length}개 반환`);
       return brands;
     } catch (error) {
       console.error('[GET /brands] 에러:', error);
@@ -119,7 +128,11 @@ export class AppController {
   // 8. 리뷰 분석 데이터 조회 (GET /review-analysis)
   @Get('review-analysis')
   async getReviewAnalysis(@Query('vehicleName') vehicleName: string) {
-    return this.appService.getReviewAnalysis(vehicleName);
+    console.log(`[GET /review-analysis] 📊 리뷰 분석 요청 받음 - vehicleName: "${vehicleName}"`);
+    const result = await this.appService.getReviewAnalysis(vehicleName);
+    console.log(`[GET /review-analysis] 📊 리뷰 분석 결과: ${result ? '데이터 있음' : '데이터 없음'}`);
+    // null을 반환해도 200 OK로 반환 (404가 아님)
+    return result || null;
   }
 
   // 9. [견적 페이지용] /vehicles/* 및 /api/vehicles/* 엔드포인트들 (두 경로 모두 지원)

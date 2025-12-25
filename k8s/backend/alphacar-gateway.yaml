@@ -8,24 +8,23 @@ spec:
     istio: ingressgateway
   servers:
   # [1] HTTP (80) 설정
-  # '*'로 되어 있어 모든 도메인을 HTTPS로 리다이렉트합니다.
+  # Cloudflare가 HTTPS를 처리하므로, HTTP 요청을 그대로 처리 (리다이렉트 없음)
   - port:
       number: 80
       name: http
       protocol: HTTP
     hosts:
-    - '*'
-    tls:
-      httpsRedirect: true
+    - alphacar.cloud
+    - www.alphacar.cloud
 
-  # [2] HTTPS (443) 설정 (수정됨)
+  # [2] HTTPS (443) 설정
   - port:
       number: 443
       name: https
       protocol: HTTPS
     tls:
       mode: SIMPLE
-      credentialName: ssl-cert # 사용 중인 인증서 시크릿
+      credentialName: istio-ingressgateway-certs # Ingress Gateway가 자동 마운트하는 Secret
     hosts:
     - alphacar.cloud
-    - www.alphacar.cloud  # <--- 여기에 www 도메인이 추가되었습니다.
+    - www.alphacar.cloud

@@ -13,6 +13,7 @@ spec:
       labels:
         app: community-backend
     spec:
+      serviceAccountName: community-backend-sa
       imagePullSecrets:
       - name: harbor-registry-secret
       containers:
@@ -26,37 +27,37 @@ spec:
           value: "3005"
         - name: SERVICE_NAME
           value: "community-backend"
-        # ConfigMap (alphacar-be-config) 참조
+        # ConfigMap (apc-be-config) 참조
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: OTEL_EXPORTER_OTLP_ENDPOINT
         - name: MARIADB_HOST
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MARIADB_HOST
         - name: MARIADB_PORT
           valueFrom:
             configMapKeyRef:
-              name: alphacar-be-config
+              name: apc-be-config
               key: MARIADB_PORT
-        # Secret (alphacar-be-secret) 참조
+        # Secret (apc-be-secret) 참조
         - name: MARIADB_USERNAME
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MARIADB_USER
         - name: MARIADB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MARIADB_PASS
         - name: MARIADB_DATABASE
           valueFrom:
             secretKeyRef:
-              name: alphacar-be-secret
+              name: apc-be-secret
               key: MARIADB_DB_NAME
         resources:
           requests:

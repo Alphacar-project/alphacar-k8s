@@ -11,24 +11,33 @@ export class AuthController {
   @Get('kakao')
   kakaoLogin(@Res() res: Response) {
     const KAKAO_CLIENT_ID = "342d0463be260fc289926a0c63c4badc";
-    // 프론트엔드 주소 (HTTPS 8000번)
-    const REDIRECT_URI = "https://192.168.0.160:8000/mypage/login"; 
+    // ✅ 환경변수 BASE_URL 사용 (현재 환경: alphacar.cloud)
+    // ✅ 프론트엔드와 일치하도록 포트 제거
+    const baseUrl = (() => {
+      const url = process.env.BASE_URL || 'https://alphacar.cloud';
+      // 포트가 있으면 제거 (예: https://alphacar.cloud:31443 -> https://alphacar.cloud)
+      return url.replace(/:\d+$/, '');
+    })();
+    const REDIRECT_URI = `${baseUrl}/mypage`; 
 
     const kakaoAuthUrl = `https://kauth.kakao.com/oauth/authorize?client_id=${KAKAO_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&response_type=code`;
 
-    // ❌ [핵심 수정] 404를 유발했던 직접 링크 대신, 백엔드가 카카오로 리다이렉트 시켜줌
     return res.redirect(kakaoAuthUrl); 
   }
 
   // ✅ 2. 카카오 로그인 콜백 처리 (POST /auth/kakao-login)
   @Post('kakao-login')
-  async kakaoLoginCallback(@Body('code') code: string, @Body('redirect_uri') redirectUri?: string) {
+  async kakaoLoginCallback(@Body() body: any) {
+    const code = body?.code;
+    const redirectUri = body?.redirect_uri;
     return this.authService.kakaoLogin(code, redirectUri);
   }
 
   // ✅ [추가] 구글 로그인 (이게 없어서 404가 떴던 겁니다!)
   @Post('google-login')
-  async googleLogin(@Body('code') code: string, @Body('redirect_uri') redirectUri?: string) {
+  async googleLogin(@Body() body: any) {
+    const code = body?.code;
+    const redirectUri = body?.redirect_uri;
     return this.authService.googleLogin(code, redirectUri);
   }
 }

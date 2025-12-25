@@ -14,12 +14,13 @@ spec:
       labels:
         app: frontend
     spec:
+      serviceAccountName: frontend-sa
       imagePullSecrets:
       - name: harbor-registry-secret
       containers:
       - name: frontend
         image: 192.168.0.170:30000/alphacar/frontend:1.0.053-d53fade
-        imagePullPolicy: Always  # 👈 추가: 항상 새 이미지를 받아오도록 강제
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
@@ -34,6 +35,17 @@ spec:
           value: "https://alphacar.cloud"
         - name: NODE_EXTRA_CA_CERTS
           value: "/etc/ssl/certs/selfsigned.crt"
+        # [ConfigMap] apc-fe-config 참조
+        - name: NEXT_PUBLIC_AICHAT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: apc-fe-config
+              key: NEXT_PUBLIC_AICHAT_URL
+        - name: NEXT_PUBLIC_API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: apc-fe-config
+              key: NEXT_PUBLIC_API_BASE_URL
         volumeMounts:
         - name: ssl-cert
           mountPath: /etc/ssl/certs/selfsigned.crt
@@ -44,7 +56,7 @@ spec:
             memory: "128Mi"
             cpu: "100m"
           limits:
-            memory: "500Mi"
+            memory: "512Mi"
             cpu: "500m"
       volumes:
       - name: ssl-cert

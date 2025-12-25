@@ -26,5 +26,5 @@
       "@schemas/*": ["src/schemas/*"]
     }
   },
-  "include": ["src/**/*", "../schemas/**/*"]
+  "include": ["src/**/*"]
 }
