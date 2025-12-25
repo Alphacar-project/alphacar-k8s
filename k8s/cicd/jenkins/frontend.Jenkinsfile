@@ -44,11 +44,11 @@ pipeline {
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
 
-                    // [버전 관리] 1.0.buildNumber-GIT_SHA 형식
+                    // [버전 관리] 1.0.빌드번호-GIT해시 형식
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
 
-                    // [중복 체크] Harbor에 동일 버전이 이미 있는지 확인
+                    // [중복 체크] Harbor에 이미 이미지가 있는지 확인
                     withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                         def harborCheck = sh(
                             script: "curl -s -u '${USER}:${PASS}' -I 'http://${HARBOR_URL}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${env.FULL_VERSION}' | grep 'HTTP/1.1 200' || true",
@@ -71,7 +71,7 @@ pipeline {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
-                        // 2-1. SonarQube 분석 (타임아웃 및 메모리 최적화)
+                        // SonarQube 분석 (타임아웃 및 메모리 최적화)
                         withEnv(["SONAR_SCANNER_OPTS=-Xmx1024m"]) {
                             withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                                 sh """
@@ -83,8 +83,7 @@ pipeline {
                                 """
                             }
                         }
-
-                        // 2-2. Trivy 보안 스캔
+                        // Trivy 보안 스캔
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --format table --output trivy_report.txt ."
                     }
                 }
@@ -104,7 +103,7 @@ pipeline {
                     echo "🐳 도커 빌드 시작: ${imageFullTag}"
 
                     dir('dev/alphacar/frontend') {
-                        // [에러 해결] Buildx 부재로 인한 에러 방지를 위해 BuildKit 옵션 제거
+                        // [에러 해결] BuildKit 에러 방지를 위해 기본 빌더 사용
                         sh "docker build -f Dockerfile -t ${imageFullTag} ."
 
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -129,22 +128,25 @@ pipeline {
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
 
-                        // [핵심 수정] 배포 파일 하나만 정확히 지정하여 이미지 업데이트
                         sh """
                             TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
 
                             if [ -f "\$TARGET_FILE" ]; then
                                 echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
-                                # image: 라인 전체를 새 Harbor 주소로 교체 (패턴 유연성 확보)
+                                # 이미지 이름(alphacar-frontend 등)에 관계없이 새 Harbor 주소로 교체
                                 sed -i "s|image: .*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
 
                                 git config user.email "jenkins@alphacar.com"
                                 git config user.name "Jenkins-CI"
                                 git add .
+                                
                                 if [ -n "\$(git status --porcelain)" ]; then
                                     git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
-                                    git push origin main
-                                    echo "✅ GitOps 레포지토리 푸시 완료"
+                                    
+                                    # [핵심 해결책] Detached HEAD 상태에서도 원격 main 브랜치로 푸시할 수 있도록 설정
+                                    git push origin HEAD:main
+                                    
+                                    echo "✅ GitOps 레포지토리 푸시 성공"
                                 else
                                     echo "ℹ️ 변경 사항이 없습니다."
                                 fi
