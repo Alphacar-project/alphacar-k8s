@@ -1,7 +1,7 @@
 pipeline {
     agent any
 
-    // 젠킨스 기본 트리거 사용 (플러그인 에러 방지)
+    // 플러그인 에러 방지를 위해 순정 트리거 사용
     triggers {
         githubPush()
     }
@@ -19,7 +19,13 @@ pipeline {
 
     stages {
         stage('1. Prepare') {
-            when { changeset "dev/alphacar/frontend/**" } // 프론트 폴더 변경 시에만 실행
+            // 프론트엔드 소스 폴더 변경 시 또는 수동 빌드 시 실행
+            when {
+                anyOf {
+                    changeset "dev/alphacar/frontend/**"
+                    buildingTag()
+                }
+            }
             steps {
                 cleanWs()
                 checkout scm
@@ -32,7 +38,6 @@ pipeline {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     
-                    // Trivy 설치 체크
                     sh '''
                         if ! command -v trivy &> /dev/null; then
                             curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
@@ -51,7 +56,7 @@ pipeline {
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                             sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.analysis.cache=true -Dsonar.sources=."
                         }
-                        // [보안] Trivy 스캔 (image_189688 기준 취약점 4개 해결 확인용)
+                        // [보안] CRITICAL 2개 해결 확인 (Next.js 15.5.9 패치 필요)
                         echo "🛡️ Trivy 보안 스캔 중..."
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
                     }
@@ -65,7 +70,7 @@ pipeline {
                 script {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     dir('dev/alphacar/frontend') {
-                        // BUILDKIT 캐시 사용하여 빌드 속도 향상
+                        // BUILDKIT 캐시로 빌드 시간 단축
                         sh "docker build --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo '${PASS}' | docker login ${HARBOR_URL} -u ${USER} --password-stdin"
