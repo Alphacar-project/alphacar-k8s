@@ -1,20 +1,9 @@
 pipeline {
     agent any
 
+    // 플러그인 에러를 방지하기 위해 기본 트리거만 사용
     triggers {
-        // 플러그인이 정상 인식되도록 소문자로 시작하는 genericTrigger 사용 권장
-        genericTrigger(
-            genericVariables: [
-                [key: 'changedFiles', value: '$.commits[*].modified[*]']
-            ],
-            causeString: 'Frontend build triggered by GitHub Push',
-            token: 'frontend-token',
-            tokenCredentialId: '',
-            printPostContent: true,
-            printContributedVariables: true,
-            regexpFilterText: '$changedFiles',
-            regexpFilterExpression: '.*dev/alphacar/frontend/.*'
-        )
+        githubPush()
     }
 
     environment {
@@ -30,6 +19,10 @@ pipeline {
 
     stages {
         stage('1. Prepare') {
+            // [핵심] 프론트엔드 소스 폴더 변경 시에만 실행
+            when {
+                changeset "dev/alphacar/frontend/**"
+            }
             steps {
                 cleanWs()
                 checkout scm
@@ -42,6 +35,7 @@ pipeline {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     
+                    // Trivy 설치 체크
                     sh '''
                         if ! command -v trivy &> /dev/null; then
                             curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
@@ -52,14 +46,20 @@ pipeline {
         }
 
         stage('2. Security & Analysis') {
+            when {
+                changeset "dev/alphacar/frontend/**"
+            }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
+                        // SonarQube 분석 (캐시 활성화)
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                             sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.analysis.cache=true -Dsonar.sources=."
                         }
-                        // Trivy 검사 (보안 0개를 목표로 진행)
+                        
+                        // [보안] 4개의 취약점(Critical 2, High 2) 해결 여부 확인
+                        echo "🛡️ Trivy 스캔 중 (Next.js 15.5.9 패치 확인)..."
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
                     }
                 }
@@ -67,6 +67,9 @@ pipeline {
         }
 
         stage('3. 고속 Docker Build & Push') {
+            when {
+                changeset "dev/alphacar/frontend/**"
+            }
             steps {
                 script {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
@@ -84,6 +87,9 @@ pipeline {
         }
 
         stage('4. Update Manifest') {
+            when {
+                changeset "dev/alphacar/frontend/**"
+            }
             steps {
                 script {
                     dir('manifest-update') {
@@ -105,6 +111,13 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            sh "docker image prune -f"
+            cleanWs()
         }
     }
 }
