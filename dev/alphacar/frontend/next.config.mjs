@@ -26,23 +26,23 @@ const nextConfig = {
         destination: 'http://traefik:9090/api/vehicles/detail',
       },
       
-      // [견적 페이지용] /api/vehicles/* → /api/* 로 rewrite (작동하는 엔드포인트로 변환)
-      {
-        source: '/api/vehicles/makers',
-        destination: 'http://main-backend:3002/api/makers',
-      },
-      {
-        source: '/api/vehicles/models',
-        destination: 'http://main-backend:3002/api/models',
-      },
-      {
-        source: '/api/vehicles/base-trims',
-        destination: 'http://main-backend:3002/api/base-trims',
-      },
-      {
-        source: '/api/vehicles/trims',
-        destination: 'http://main-backend:3002/api/trims',
-      },
+      // [견적 페이지용] /api/vehicles/* → Istio VirtualService에서 처리
+      // {
+      //   source: '/api/vehicles/makers',
+      //   destination: 'http://main-backend:3002/api/makers',
+      // },
+      // {
+      //   source: '/api/vehicles/models',
+      //   destination: 'http://main-backend:3002/api/models',
+      // },
+      // {
+      //   source: '/api/vehicles/base-trims',
+      //   destination: 'http://main-backend:3002/api/base-trims',
+      // },
+      // {
+      //   source: '/api/vehicles/trims',
+      //   destination: 'http://main-backend:3002/api/trims',
+      // },
 
       // ----------------------------------------------------
       // ★ [QUOTE SERVICE] (견적 및 기타 차량 정보)
@@ -60,11 +60,11 @@ const nextConfig = {
         destination: 'http://traefik:9090/api/estimate/:path*',
       },
 
-      // ✅ 3. [최근 본 차량 (History)]
-      {
-        source: '/api/history/:path*',
-        destination: 'http://traefik:9090/api/history/:path*',
-      },
+      // ✅ 3. [최근 본 차량 (History)] - Istio VirtualService에서 처리
+      // {
+      //   source: '/api/history/:path*',
+      //   destination: 'http://traefik:9090/api/history/:path*',
+      // },
 
       // 3. [이전 API 호환성 확보]
       {
@@ -74,70 +74,73 @@ const nextConfig = {
 
       // ----------------------------------------------------
       // [MAIN SERVICE - 일반 데이터]
+      // 클라이언트 사이드 API 호출을 위해 rewrites 활성화
+      // Istio VirtualService와 함께 작동 (서버 사이드 + 클라이언트 사이드)
       // ----------------------------------------------------
 
       // 4. [메인 데이터 처리]
       {
         source: '/api/main/:path*',
-        destination: 'http://traefik:9090/api/main/:path*',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/main/:path*',
       },
 
       // 4-1. [브랜드 목록]
       {
         source: '/api/brands',
-        destination: 'http://traefik:9090/api/brands',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/brands',
       },
 
       // 4-2. [판매 순위]
-      // Traefik의 PathPrefix('/api/sales') 규칙을 타도록 설정
-      {
-        source: '/api/ranking',
-        destination: 'http://traefik:9090/api/sales/rankings',
-      },
       {
         source: '/api/sales/:path*',
-        destination: 'http://traefik:9090/api/sales/:path*',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/sales/:path*',
       },
 
-      // 5. [찜하기 기능]
+      // 5. [최근 본 차량 (History)]
+      {
+        source: '/api/history/:path*',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/history/:path*',
+      },
+
+      // 5-1. [찜하기 기능]
       {
         source: '/api/favorites/:path*',
-        destination: 'http://traefik:9090/api/favorites/:path*',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/favorites/:path*',
       },
 
-      // 5-1. [최근 본 차량]
+      // 5-2. [최근 본 차량]
       {
         source: '/api/recent-views',
-        destination: 'http://traefik:9090/api/recent-views',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/recent-views',
       },
 
-      // 5-2. [리뷰 분석]
+      // 5-3. [리뷰 분석]
       {
         source: '/api/review-analysis',
-        destination: 'http://traefik:9090/api/review-analysis',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/review-analysis',
       },
 
       // ----------------------------------------------------
       // [OTHER SERVICES]
       // ----------------------------------------------------
 
-      // 6. [커뮤니티]
-      {
-        source: '/api/community/:path*',
-        destination: 'http://traefik:9090/api/community/:path*',
-      },
+      // 6. [커뮤니티] - 주석 처리 (Community Backend 없음, Istio VirtualService에서 처리)
+      // {
+      //   source: '/api/community/:path*',
+      //   destination: 'http://traefik:9090/api/community/:path*',
+      // },
 
-      // 7. [마이페이지]
-      {
-        source: '/api/mypage/:path*',
-        destination: 'http://traefik:9090/api/mypage/:path*',
-      },
+      // 7. [마이페이지] - 주석 처리 (MyPage Backend 없음, Istio VirtualService에서 처리)
+      // {
+      //   source: '/api/mypage/:path*',
+      //   destination: 'http://traefik:9090/api/mypage/:path*',
+      // },
       
-      // 7-1. [인증 (로그인)]
-      {
-        source: '/api/auth/:path*',
-        destination: 'http://traefik:9090/api/auth/:path*',
-      },
+      // 7-1. [인증 (로그인)] - 주석 처리 (MyPage Backend 없음, Istio VirtualService에서 처리)
+      // {
+      //   source: '/api/auth/:path*',
+      //   destination: 'http://traefik:9090/api/auth/:path*',
+      // },
       
       // 8. [검색]
       {

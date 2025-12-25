@@ -10,7 +10,8 @@ import MidBanner from "./components/MidBanner";
 import BrandTestDriveSection from "./components/BrandTestDriveSection";
 
 // 백엔드 주소
-const API_RANKING_URL = "/api/sales/rankings";
+// ✅ 원래대로 /sales/rankings 직접 호출 (VirtualService의 직접 경로 규칙 사용)
+const API_RANKING_URL = "/sales/rankings";
 
 const bannerItems = [
   { id: 1, img: "/banners/banner1.png", link: "/cashback" },

@@ -142,12 +142,19 @@ function LoginContent() {
     }
   }, []);
 
+  // 포트 번호 제거 헬퍼 함수
+  const getRedirectUri = () => {
+    const origin = window.location.origin;
+    // 포트 번호 제거 (예: https://alphacar.cloud:31443 -> https://alphacar.cloud)
+    return origin.replace(/:\d+$/, "") + "/mypage";
+  };
+
   // 🔵 구글 로그인
   const handleGoogleLogin = () => {
     const CLIENT_ID =
       "1030657487130-g7891k55pfhijc8gh1kedccnkf75v2qf.apps.googleusercontent.com";
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
-    const REDIRECT_URI = `${window.location.origin}/mypage`;
+    const REDIRECT_URI = getRedirectUri();
 
     const googleURL = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&scope=email profile&state=google`;
     window.location.href = googleURL;
@@ -157,7 +164,7 @@ function LoginContent() {
   const handleKakaoLogin = () => {
     const REST_API_KEY = "342d0463be260fc289926a0c63c4badc";
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
-    const REDIRECT_URI = `${window.location.origin}/mypage`;
+    const REDIRECT_URI = getRedirectUri();
 
     const kakaoURL = `https://kauth.kakao.com/oauth/authorize?client_id=${REST_API_KEY}&redirect_uri=${REDIRECT_URI}&response_type=code`;
     window.location.href = kakaoURL;

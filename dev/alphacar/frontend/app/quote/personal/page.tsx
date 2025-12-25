@@ -300,24 +300,53 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
       (bt._id === newBaseTrimId || bt.id === newBaseTrimId || bt.name === newBaseTrimId || bt.base_trim_name === newBaseTrimId)
     );
     const baseTrimName = foundBaseTrim?.base_trim_name || foundBaseTrim?.name || newBaseTrimId;
+    
+    console.log("[개별견적 세부 트림] 선택 정보:", {
+      newBaseTrimId,
+      foundBaseTrim,
+      baseTrimName,
+      modelName,
+      brandName,
+      modelId,
+      baseTrimsCount: baseTrims.length
+    });
 
     // 기본 트림 선택 후 세부 트림 목록 가져오기
-    // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+    // ⚠️ 백엔드는 modelId 파라미터를 base_trim_name으로 사용함
+    // 따라서 baseTrimName을 modelId로 전달해야 함
     const queryParams = new URLSearchParams();
-    queryParams.append('modelId', modelId);
-    if (baseTrimName && baseTrimName !== '없음') queryParams.append('baseTrimName', baseTrimName);
-    if (modelName && modelName !== '없음') queryParams.append('modelName', modelName);
-    if (brandName && brandName !== '없음') queryParams.append('brandName', brandName);
+    if (baseTrimName) {
+      queryParams.append('modelId', baseTrimName); // baseTrimName을 modelId로 전달
+    } else if (modelId) {
+      queryParams.append('modelId', modelId); // fallback
+    }
 
-    fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`)
+    const url = `${API_BASE}/vehicles/trims?${queryParams.toString()}`;
+    console.log("[세부 트림] API 호출:", url);
+    fetch(url)
       .then(handleApiResponse)
       .then((data: any) => {
+        console.log("[세부 트림] API 응답:", data);
         if (Array.isArray(data)) {
+          console.log("[세부 트림] 트림 개수:", data.length);
           setTrims(data);
           // 자동 선택 로직 제거 - 사용자가 직접 선택하도록 함
-        } else setTrims([]);
+        } else {
+          console.warn("[세부 트림] 응답이 배열이 아님:", data);
+          setTrims([]);
+        }
       })
-      .catch((err: any) => console.error("세부 트림 로딩 실패:", err));
+      .catch((err: any) => {
+        console.error("세부 트림 로딩 실패:", err);
+        console.error("세부 트림 로딩 실패 - 상세:", {
+          message: err.message,
+          stack: err.stack,
+          url: url,
+          queryParams: queryParams.toString()
+        });
+        alert(`세부 트림을 불러오는데 실패했습니다.\n에러: ${err.message || '알 수 없는 오류'}`);
+        setTrims([]);
+      });
   };
 
   const handleTrimChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -411,8 +440,9 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
             ) : (
                trims.map((t, idx) => {
                  const uniqueKey = t._id || `trim-${idx}`;
-                 // _id를 우선 사용 (고유성 보장), 없으면 trim_name 사용
-                 const val = t._id || t.trim_name || t.name || t.lineup_id || "";
+                 // trim_name을 우선 사용 (고유성 보장), _id는 lineup_id일 수 있어서 부정확할 수 있음
+                 // trim_name이 고유 식별자로 사용됨
+                 const val = t.trim_name || t.name || t._id || t.lineup_id || "";
                  return <option key={uniqueKey} value={val}>{t.name || t.trim_name}</option>;
                })
             )}
@@ -533,6 +563,8 @@ function PersonalQuotePageContent() {
           ...rawVehicleData, // 상위 정보 유지
           name: selectedTrim.trim_name, // ✅ 트림명 덮어쓰기
           base_price: selectedTrim.price, // ✅ 트림 가격 덮어쓰기
+          imageUrl: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 메인페이지와 호환을 위한 imageUrl 필드 추가
+          main_image: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 추가 필드
           // options: selectedTrim.options, // 옵션은 result 페이지에서 다시 가져오므로 여기서는 생략
       };
       

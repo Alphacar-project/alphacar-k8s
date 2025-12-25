@@ -54,6 +54,13 @@ function MyPageContent() {
   const [welcomeName, setWelcomeName] = useState("");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
+  // 포트 번호 제거 헬퍼 함수
+  const getRedirectUri = () => {
+    const origin = window.location.origin;
+    // 포트 번호 제거 (예: https://alphacar.cloud:31443 -> https://alphacar.cloud)
+    return origin.replace(/:\d+$/, "") + "/mypage";
+  };
+
   // 🔹 소셜 로그인 처리 + 백엔드에서 마이페이지 정보 가져오기
   useEffect(() => {
     const processAuth = async () => {
@@ -66,15 +73,15 @@ function MyPageContent() {
 
           // 현재 도메인 기반으로 API 호출 (ngrok 지원)
           // redirect_uri도 함께 전달하여 카카오/구글 OAuth 검증 통과
-          const redirectUri = `${window.location.origin}/mypage`;
+          const redirectUri = getRedirectUri();
           if (state === "google") {
             response = await axios.post(
-              `${window.location.origin}/auth/google-login`,
+              `${window.location.origin}/api/auth/google-login`,
               { code, redirect_uri: redirectUri }
             );
           } else {
             response = await axios.post(
-              `${window.location.origin}/auth/kakao-login`,
+              `${window.location.origin}/api/auth/kakao-login`,
               { code, redirect_uri: redirectUri }
             );
           }
@@ -91,9 +98,11 @@ function MyPageContent() {
             console.warn("로그인 응답에 socialId가 없습니다.");
           }
 
+          // ✅ 토큰 저장
           localStorage.setItem("accessToken", access_token);
           localStorage.setItem("alphacarUser", JSON.stringify(loggedInUser));
 
+          // ✅ 환영 메시지 설정
           const welcome =
             loggedInUser.nickname ||
             loggedInUser.name ||
@@ -101,22 +110,52 @@ function MyPageContent() {
             "ALPHACAR 회원";
           localStorage.setItem("alphacarWelcomeName", welcome);
 
+          // ✅ 사용자 정보 바로 설정 (fetchMypageInfo 호출 전에)
+          setUser(loggedInUser);
+          setWelcomeName(welcome);
+          setShowWelcomeModal(true);
+          setCheckedAuth(true);
+          
+          // ✅ URL에서 code 제거하고 마이페이지로 이동
           router.replace("/mypage");
           return;
-        } catch (error) {
+        } catch (error: any) {
           console.error("로그인 실패:", error);
           clearAuthStorage();
-          alert("로그인에 실패했습니다. 백엔드 연결을 확인해주세요.");
+          
+          let errorMessage = "로그인에 실패했습니다.";
+          if (error.response?.status === 400) {
+            errorMessage = error.response?.data?.message || "카카오 로그인에 실패했습니다. 다시 시도해주세요.";
+          } else if (error.response?.status === 404) {
+            errorMessage = "서버를 찾을 수 없습니다. 관리자에게 문의해주세요.";
+          } else if (error.response?.status >= 500) {
+            errorMessage = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+          } else if (error.message === 'Network Error') {
+            errorMessage = "네트워크 연결을 확인해주세요.";
+          }
+          
+          alert(errorMessage);
           router.replace("/mypage/login");
           return;
         }
       }
 
-      // Case 2: 일반 접속
+      // Case 2: 토큰 기반 접속 (카카오 로그인 후)
+      // ✅ 카카오 로그인 토큰 확인
+      const token = localStorage.getItem("accessToken") || localStorage.getItem("alphacarToken");
+      
+      if (!token) {
+        // 토큰이 없으면 로그인 페이지로
+        setUser(null);
+        setCheckedAuth(true);
+        return;
+      }
+      
+      // ✅ 토큰이 있으면 먼저 백엔드에서 사용자 정보 조회 시도
       try {
         const data = await fetchMypageInfo();
-
         if (data.isLoggedIn && data.user) {
+          // 백엔드에서 가져온 최신 정보로 업데이트
           if (!data.user.provider) {
             const localUser = JSON.parse(
               localStorage.getItem("alphacarUser") || "{}"
@@ -126,7 +165,10 @@ function MyPageContent() {
             }
           }
           setUser(data.user);
-
+          // localStorage에도 최신 정보 저장
+          localStorage.setItem("alphacarUser", JSON.stringify(data.user));
+          
+          // 저장된 환영 메시지가 있으면 표시
           const storedWelcome = localStorage.getItem("alphacarWelcomeName");
           if (storedWelcome) {
             setWelcomeName(storedWelcome);
@@ -134,13 +176,36 @@ function MyPageContent() {
             localStorage.removeItem("alphacarWelcomeName");
           }
         } else {
-          setUser(null);
+          // 백엔드에서 인증 실패 시 localStorage 정리
           clearAuthStorage();
+          setUser(null);
         }
       } catch (error) {
-        console.error("마이페이지 정보 불러오기 실패:", error);
-        clearAuthStorage();
-        setUser(null);
+        // 백엔드 요청 실패 시 localStorage 정보 확인
+        console.error("마이페이지 정보 불러오기 실패, localStorage 정보 확인:", error);
+        const localUserStr = localStorage.getItem("alphacarUser");
+        if (localUserStr) {
+          try {
+            const localUser = JSON.parse(localUserStr);
+            setUser(localUser);
+            
+            // 저장된 환영 메시지가 있으면 표시
+            const storedWelcome = localStorage.getItem("alphacarWelcomeName");
+            if (storedWelcome) {
+              setWelcomeName(storedWelcome);
+              setShowWelcomeModal(true);
+              localStorage.removeItem("alphacarWelcomeName");
+            }
+          } catch (e) {
+            console.error("localStorage 사용자 정보 파싱 실패:", e);
+            clearAuthStorage();
+            setUser(null);
+          }
+        } else {
+          // localStorage에도 사용자 정보가 없으면 정리
+          clearAuthStorage();
+          setUser(null);
+        }
       } finally {
         setCheckedAuth(true);
       }

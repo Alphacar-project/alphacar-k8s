@@ -33,6 +33,7 @@ interface VehicleData {
 }
 
 // 백엔드 API 주소
+// ✅ Next.js API Route를 통해 라우팅되도록 /api 사용
 const API_BASE = "/api";
 
 // [유틸] 견고한 HTTP 응답 처리
@@ -157,27 +158,57 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
     const selectedMaker = makers.find((m: any) => m._id === makerId);
     const modelName = selectedModel?.model_name || selectedModel?.name || "";
     const brandName = selectedMaker?.name || "";
-    const baseTrimName = baseTrims.find((bt: any) => 
+    const foundBaseTrim = baseTrims.find((bt: any) => 
       (bt._id === newBaseTrimId || bt.id === newBaseTrimId || bt.name === newBaseTrimId || bt.base_trim_name === newBaseTrimId)
-    )?.base_trim_name || newBaseTrimId;
+    );
+    const baseTrimName = foundBaseTrim?.base_trim_name || foundBaseTrim?.name || newBaseTrimId;
+    
+    console.log("[비교견적 세부 트림] 선택 정보:", {
+      newBaseTrimId,
+      foundBaseTrim,
+      baseTrimName,
+      modelName,
+      brandName,
+      modelId,
+      baseTrimsCount: baseTrims.length
+    });
 
     // 기본 트림 선택 후 세부 트림 목록 가져오기
-    // ✅ 엄격한 필터링: baseTrimName, modelName, brandName을 모두 전달
+    // ⚠️ 백엔드는 modelId 파라미터를 base_trim_name으로 사용함
+    // 따라서 baseTrimName을 modelId로 전달해야 함
     const queryParams = new URLSearchParams();
-    queryParams.append('modelId', modelId);
-    if (baseTrimName) queryParams.append('baseTrimName', baseTrimName);
-    if (modelName) queryParams.append('modelName', modelName);
-    if (brandName) queryParams.append('brandName', brandName);
+    if (baseTrimName) {
+      queryParams.append('modelId', baseTrimName); // baseTrimName을 modelId로 전달
+    } else if (modelId) {
+      queryParams.append('modelId', modelId); // fallback
+    }
 
-    fetch(`${API_BASE}/vehicles/trims?${queryParams.toString()}`)
+    const url = `${API_BASE}/vehicles/trims?${queryParams.toString()}`;
+    console.log("[세부 트림] API 호출:", url);
+    fetch(url)
       .then(handleApiResponse)
       .then((data) => {
+        console.log("[세부 트림] API 응답:", data);
         if (Array.isArray(data)) {
+          console.log("[세부 트림] 트림 개수:", data.length);
           setTrims(data);
           // 자동 선택 로직 제거 - 사용자가 직접 선택하도록 함
-        } else setTrims([]);
+        } else {
+          console.warn("[세부 트림] 응답이 배열이 아님:", data);
+          setTrims([]);
+        }
       })
-      .catch((err) => console.error("세부 트림 로딩 실패:", err));
+      .catch((err) => {
+        console.error("세부 트림 로딩 실패:", err);
+        console.error("세부 트림 로딩 실패 - 상세:", {
+          message: err.message,
+          stack: err.stack,
+          url: url,
+          queryParams: queryParams.toString()
+        });
+        alert(`세부 트림을 불러오는데 실패했습니다.\n에러: ${err.message || '알 수 없는 오류'}`);
+        setTrims([]);
+      });
   };
 
   const handleTrimChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -257,8 +288,9 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
             ) : (
                trims.map((t, idx) => {
                  const uniqueKey = t._id ? t._id : `trim-${idx}`;
-                 // _id를 우선 사용 (고유성 보장), 없으면 trim_name 사용
-                 const val = t._id || t.trim_name || t.name || t.lineup_id;
+                 // trim_name을 우선 사용 (고유성 보장), _id는 lineup_id일 수 있어서 부정확할 수 있음
+                 // trim_name이 고유 식별자로 사용됨
+                 const val = t.trim_name || t.name || t._id || t.lineup_id;
                  return <option key={uniqueKey} value={val}>{t.name || t.trim_name}</option>;
                })
             )}
@@ -440,17 +472,23 @@ function CompareQuoteContent() {
           // "Reserve A/T:1" 형식에서 실제 트림 이름만 추출 (":숫자" 제거)
           const trimNameOnly = decodedTrimId.split(':')[0].trim();
 
-          // A. _id로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
-          selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
+          // A. trim_name으로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
+          // trim_name이 세부 트림 선택 시 사용된 값이므로 우선 매칭
+          selectedTrim = trims.find((t: any) => t.trim_name === trimId || t.trim_name === decodedTrimId || t.trim_name === trimNameOnly);
 
-          // B. trim_id로 찾기
+          // B. name으로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
+              selectedTrim = trims.find((t: any) => t.name === trimId || t.name === decodedTrimId || t.name === trimNameOnly);
           }
 
-          // C. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
+          // C. _id로 찾기 (lineup_id일 수 있으므로 보조적으로만 사용)
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+              selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
+          }
+
+          // D. trim_id로 찾기
+          if (!selectedTrim) {
+              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
           }
 
           // D. Fallback: 여전히 못 찾았다면 첫 번째 트림을 기본값으로 사용
@@ -471,6 +509,8 @@ function CompareQuoteContent() {
           base_price: selectedTrim.price, // ✅ 트림 가격
           options: selectedTrim.options || [], // ✅ 옵션 배열
           image_url: rawVehicleData.main_image || rawVehicleData.image_url, // 이미지 URL 통합
+          imageUrl: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 메인페이지와 호환을 위한 imageUrl 필드 추가
+          main_image: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 추가 필드
           selectedTrimSpecs: rawVehicleData.selectedTrimSpecs || null, // ✅ 선택된 트림의 전체 specifications
       };
       

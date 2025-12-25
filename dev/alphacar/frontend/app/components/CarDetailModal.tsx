@@ -117,21 +117,8 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
   const [allImages, setAllImages] = useState<ImageItem[]>([]);
 
   // ✅ [최종 수정] 백엔드가 보내준 'vehicleId' 필드를 직접 사용합니다.
-  // vehicleId가 객체인 경우 lineup_id를 우선 사용, 없으면 _id 사용
-  let targetId: string | undefined;
-  if (car?.vehicleId) {
-    if (typeof car.vehicleId === 'object' && car.vehicleId !== null) {
-      // vehicleId가 populate된 객체인 경우
-      targetId = (car.vehicleId as any).lineup_id || (car.vehicleId as any)._id?.toString() || (car.vehicleId as any).id?.toString();
-    } else {
-      // vehicleId가 문자열인 경우
-      targetId = String(car.vehicleId);
-    }
-  }
-  if (!targetId) {
-    targetId = car?._id?.toString() || car?.id?.toString();
-  } 
-  
+  const targetId = car?.vehicleId || car?._id || car?.id;
+
   const carName = car?.name || car?.vehicle_name;
   const brandName = car?.manufacturer || car?.brand_name;
   // ✅ 이미지 우선순위: 1) car 객체의 imageUrl (메인페이지에서 전달), 2) carDetail의 main_image (API 응답), 3) car의 main_image
@@ -244,31 +231,29 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
 
   // ✅ [최종 수정] 이동 로직: 개별 견적 페이지로 이동 (트림 지정 없이 모델만 선택)
   const handleGoToQuoteResult = () => {
+    if (!targetId) {
+      // 여전히 ID가 없다면 콘솔에 전체 객체를 찍어서 확인
+      console.error("ID Missing in car object:", car);
+      alert("차량 ID 정보를 불러오지 못했습니다.");
+      return;
+    }
+
     // 차량 이름에서 브랜드명과 모델명 추출 (예: "[기아] 모닝" -> 브랜드: "기아", 모델: "모닝")
-    const vehicleName = carDetail?.vehicle_name || car?.vehicle_name || car?.name || carName || "";
+    const vehicleName = carDetail?.vehicle_name || car?.vehicle_name || car?.name || "";
     const brandMatch = vehicleName.match(/\[([^\]]+)\]/);
-    const extractedBrandName = brandMatch ? brandMatch[1] : (carDetail?.brand_name || car?.brand_name || car?.manufacturer || brandName || "");
-    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0].trim() || "";
-    
+    const brandName = brandMatch ? brandMatch[1] : (carDetail?.brand_name || car?.brand_name || car?.manufacturer || "");
+    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0] || "";
+
     // 개별 견적 페이지로 이동 (트림은 선택되지 않은 상태, 모델만 전달)
     const queryParams = new URLSearchParams();
     if (extractedModelName) {
       queryParams.append('modelName', extractedModelName);
     }
-    if (extractedBrandName) {
-      queryParams.append('brandName', extractedBrandName);
+    if (brandName) {
+      queryParams.append('brandName', brandName);
     }
-    
-    // trimId가 있으면 전달 (선택된 트림이 있는 경우)
-    if (targetId) {
-      queryParams.append('trimId', targetId);
-    }
-    
-    const queryString = queryParams.toString();
-    const url = `/quote/personal${queryString ? `?${queryString}` : ''}`;
-    
-    console.log("Navigating to:", url, { extractedModelName, extractedBrandName, targetId });
-    router.push(url);
+    // trimId는 전달하지 않아서 모델만 선택된 상태로 표시
+    router.push(`/quote/personal?${queryParams.toString()}`);
   };
 
   // 제원 정보 포맷팅

@@ -162,10 +162,12 @@ function QuoteResultContent() {
                 name: selectedTrim.trim_name, // 트림명
                 base_price: selectedTrim.price, // 트림 가격
                 options: selectedTrim.options || [], // 옵션 배열
+                imageUrl: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 메인페이지와 호환을 위한 imageUrl 필드 추가
             };
         } else {
             mergedDetail = rawVehicleData;
             mergedDetail.options = rawVehicleData.options || [];
+            mergedDetail.imageUrl = rawVehicleData.main_image || rawVehicleData.image_url; // ✅ 추가
         }
 
         setCarDetail(mergedDetail);

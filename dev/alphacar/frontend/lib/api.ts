@@ -7,9 +7,9 @@ import Cookies from 'js-cookie';
 // ----------------------------------------------------------------------
 // 현재 도메인 기반으로 baseURL 설정
 const getBaseURL = () => {
-  if (typeof window === 'undefined') return '/api'; // SSR
-  // ngrok 도메인 또는 현재 도메인 사용
-  return window.location.origin + '/api';
+  // 직접 경로 사용 - VirtualService가 /main, /brands 등을 직접 라우팅
+  // 클라이언트 사이드 요청이 VirtualService를 거치도록 빈 문자열 사용
+  return '';
 };
 
 const api = axios.create({
@@ -27,8 +27,9 @@ api.interceptors.request.use(
     let token = Cookies.get('accessToken');
 
     // 2. 쿠키에 없으면 로컬스토리지 확인 (이전 호환성 및 클라이언트용)
+    // ⚠️ user_social_id는 토큰이 아니므로 제외
     if (!token && typeof window !== 'undefined') {
-      token = localStorage.getItem('alphacarToken') || localStorage.getItem('user_social_id');
+      token = localStorage.getItem('accessToken') || localStorage.getItem('alphacarToken');
     }
 
     // 3. 토큰이 있으면 헤더에 심어주기
@@ -81,7 +82,10 @@ export type MainData = {
 
 export async function fetchMainData(brand?: string): Promise<MainData> {
   const params = brand && brand !== '전체' && brand !== 'all' ? { brand } : {};
+  // ✅ 원래대로 /main 직접 호출 (VirtualService의 직접 경로 규칙 사용)
+  // VirtualService에 /main 직접 경로 규칙이 있으므로 클라이언트에서도 작동해야 함
   const { data } = await api.get<MainData>('/main', { params });
+  console.log('[fetchMainData] 응답 데이터:', data);
   return data;
 }
 
@@ -90,12 +94,14 @@ export type QuoteInitData = { message: string; models: string[]; trims: string[]
 export type QuoteSaveResponse = { success: boolean; message: string; id: string };
 
 export async function fetchQuoteInitData(): Promise<QuoteInitData> {
-  const { data } = await api.get<QuoteInitData>('/quote');
+  // /quote는 Next.js 페이지 경로이므로 /api/quote로 호출
+  const { data } = await api.get<QuoteInitData>('/api/quote');
   return data;
 }
 
 export async function saveQuote(payload: any): Promise<QuoteSaveResponse> {
-  const { data } = await api.post<QuoteSaveResponse>('/quote/save', payload);
+  // /quote는 Next.js 페이지 경로이므로 /api/quote/save로 호출
+  const { data } = await api.post<QuoteSaveResponse>('/api/quote/save', payload);
   return data;
 }
 
@@ -171,11 +177,13 @@ export type Brand = { name: string; logo_url?: string };
 export type BrandWithLogo = { name: string; logo_url: string };
 
 export async function fetchBrands(): Promise<Brand[]> {
+  // ✅ 원래대로 /brands 직접 호출 (VirtualService의 직접 경로 규칙 사용)
   const { data } = await api.get<Brand[]>('/brands');
   return data;
 }
 
 export async function fetchBrandsWithLogo(): Promise<BrandWithLogo[]> {
+  // ✅ 원래대로 /brands 직접 호출 (VirtualService의 직접 경로 규칙 사용)
   const { data } = await api.get<BrandWithLogo[]>('/brands');
   return data;
 }
