@@ -19,7 +19,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        image: 192.168.0.170:30000/alphacar/frontend:1.0.053-d53fade
+        image: 192.168.0.170:30000/alphacar/frontend:1.0.0.69-dc7e918
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
