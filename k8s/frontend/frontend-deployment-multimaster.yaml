@@ -18,7 +18,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: frontend
-        image: 192.168.0.170:30000/alphacar/alphacar-frontend:latest # 👈 Harbor 주소 통일
+        image: 192.168.0.170:30000/alphacar/frontend:1.0.0.68-d87d8e8
         imagePullPolicy: Always  # 👈 추가: 항상 새 이미지를 받아오도록 강제
         ports:
         - containerPort: 8000
