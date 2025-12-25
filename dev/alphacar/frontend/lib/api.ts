@@ -82,8 +82,7 @@ export type MainData = {
 
 export async function fetchMainData(brand?: string): Promise<MainData> {
   const params = brand && brand !== '전체' && brand !== 'all' ? { brand } : {};
-  // ✅ 원래대로 /main 직접 호출 (VirtualService의 직접 경로 규칙 사용)
-  // VirtualService에 /main 직접 경로 규칙이 있으므로 클라이언트에서도 작동해야 함
+  // ✅ /main 직접 호출 (기존 설정)
   const { data } = await api.get<MainData>('/main', { params });
   console.log('[fetchMainData] 응답 데이터:', data);
   return data;
@@ -177,13 +176,13 @@ export type Brand = { name: string; logo_url?: string };
 export type BrandWithLogo = { name: string; logo_url: string };
 
 export async function fetchBrands(): Promise<Brand[]> {
-  // ✅ 원래대로 /brands 직접 호출 (VirtualService의 직접 경로 규칙 사용)
+  // ✅ /brands 직접 호출 (기존 설정)
   const { data } = await api.get<Brand[]>('/brands');
   return data;
 }
 
 export async function fetchBrandsWithLogo(): Promise<BrandWithLogo[]> {
-  // ✅ 원래대로 /brands 직접 호출 (VirtualService의 직접 경로 규칙 사용)
+  // ✅ /brands 직접 호출 (기존 설정)
   const { data } = await api.get<BrandWithLogo[]>('/brands');
   return data;
 }

@@ -6,6 +6,19 @@ const nextConfig = {
   async rewrites() {
     return [
       // ----------------------------------------------------
+      // [우선순위 최상단] MAIN SERVICE - 직접 경로
+      // 클라이언트 사이드 API 호출을 위해 /main, /brands 등을 먼저 처리
+      // ----------------------------------------------------
+      {
+        source: '/main/:path*',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/main/:path*',
+      },
+      {
+        source: '/brands',
+        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/brands',
+      },
+
+      // ----------------------------------------------------
       // [AI CHAT SERVICE] - Traefik을 통해 4000번 포트로 연결
       // ----------------------------------------------------
       {
@@ -78,13 +91,15 @@ const nextConfig = {
       // Istio VirtualService와 함께 작동 (서버 사이드 + 클라이언트 사이드)
       // ----------------------------------------------------
 
-      // 4. [메인 데이터 처리]
+      // 4. [메인 데이터 처리 - API 경로]
+      // /api/main도 지원 (기존 호환성)
       {
         source: '/api/main/:path*',
         destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/main/:path*',
       },
 
-      // 4-1. [브랜드 목록]
+      // 4-1. [브랜드 목록 - API 경로]
+      // /api/brands도 지원 (기존 호환성)
       {
         source: '/api/brands',
         destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/brands',
