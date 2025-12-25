@@ -55,7 +55,7 @@ export default function LeftAdBanner() {
           }}
         >
           <img
-            src="/ad/christmas-banner.png"
+            src="/ad/space-game-banner"
             alt="알파카 타고 우주 여행"
             style={{
               display: "block",
