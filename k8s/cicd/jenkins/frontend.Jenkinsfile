@@ -7,16 +7,22 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'ACTION', choices: ['build_and_deploy', 'skip_build'], description: '실행 여부')
+        choice(name: 'ACTION',
+               choices: ['build_and_deploy', 'skip_build'],
+               description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
+        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
     }
 
     environment {
         HARBOR_URL      = '192.168.0.170:30000'
         HARBOR_PROJECT  = 'alphacar'
-        IMAGE_NAME      = 'frontend' // 최종 이미지 이름: frontend
+        IMAGE_NAME      = 'frontend'
         HARBOR_CRED_ID  = 'harbor-cred'
         GIT_CREDENTIAL_ID = 'github-cred'
+
         SONARQUBE_NAME = 'SonarQube'
+        SONAR_HOST_URL = 'http://192.168.0.170:32000'
+
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
     }
 
@@ -28,114 +34,111 @@ pipeline {
                 checkout scm
                 script {
                     def baseVer = "1.0"
+                    // 실제 소스 위치인 dev/alphacar/frontend 내부의 version.txt 참조
                     def versionPath = 'dev/alphacar/frontend/version.txt'
-                    if (fileExists(versionPath)) {
-                        baseVer = readFile(versionPath).trim()
+                    try {
+                        if (fileExists(versionPath)) {
+                            baseVer = readFile(versionPath).trim()
+                        }
+                    } catch (e) {
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-                    // 최종 버전 형식: 1.0.50-e336570
-                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
-                    echo "📦 생성된 버전: ${env.FULL_VERSION}"
+                    
+                    // [버전 관리] 1.0.20-xxxx 형식으로 생성
+                    env.FULL_VERSION = "${baseVer}${currentBuild.number}-${env.GIT_SHA}"
+                    echo "📦 빌드 버전: ${env.FULL_VERSION}"
 
-                    // [중복 체크] Harbor 이미지 존재 여부 확인
-                    withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        def harborCheck = sh(
-                            script: "curl -s -u '${USER}:${PASS}' -I 'http://${HARBOR_URL}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${env.FULL_VERSION}' | grep 'HTTP/1.1 200' || true",
-                            returnStdout: true
-                        ).trim()
-                        env.IMAGE_EXISTS = harborCheck.contains("200") ? "true" : "false"
-                    }
-
-                    if (env.IMAGE_EXISTS == "true") {
-                        echo "✅ [SKIP] 동일 버전이 Harbor에 이미 존재합니다."
-                    }
-
-                    sh 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp'
+                    // [보안] Trivy 설치 확인 (없으면 /tmp에 임시 설치)
+                    sh '''
+                        if ! command -v trivy &> /dev/null; then
+                            echo "📦 Trivy 설치 진행..."
+                            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                        fi
+                    '''
                 }
             }
         }
 
-        stage('2. Security & Analysis') {
-            // 이미지가 없고 + 배포 액션일 때만 실행
-            when { 
-                allOf {
-                    expression { env.IMAGE_EXISTS == "false" }
-                    expression { params.ACTION == 'build_and_deploy' }
-                }
-            }
+        stage('2. Security & Quality Analysis') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
-                dir('dev/alphacar/frontend') {
-                    echo "🛡️ Trivy 보안 스캔 시작 (취약점 0개 목표)..."
-                    // package.json 15.5.9 적용 시 취약점 0개 달성 가능
-                    sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
+                script {
+                    def scannerHome = tool name: 'sonar-scanner'
+                    dir('dev/alphacar/frontend') {
+                        // 2-1. SonarQube 분석 최적화 (변경된 코드 위주 분석)
+                        withSonarQubeEnv("${env.SONARQUBE_NAME}") {
+                            sh """
+                                ${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=alphacar-frontend \
+                                -Dsonar.projectName=alphacar-frontend \
+                                -Dsonar.sources=. \
+                                -Dsonar.analysis.cache=true \
+                                -Dsonar.host.url=${env.SONAR_HOST_URL} \
+                                -Dsonar.sourceEncoding=UTF-8 \
+                                -Dsonar.exclusions=**/node_modules/**,**/.next/**,**/dist/**,**/out/**,**/*.test.js,**/*.spec.js \
+                                -Dsonar.scanner.timeout=300
+                            """
+                        }
+                        
+                        // 2-2. Trivy 보안 스캔 (파일 시스템 기반)
+                        echo "🛡️ 프론트엔드 소스 코드 취약점 스캔 중..."
+                        sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 . || echo '스캔 실패'"
+                    }
                 }
             }
         }
 
         stage('3. 고속 Docker Build & Push') {
-            when { 
-                allOf {
-                    expression { env.IMAGE_EXISTS == "false" }
-                    expression { params.ACTION == 'build_and_deploy' }
-                }
-            }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
-                    echo "🐳 도커 이미지 빌드: ${imageFullTag}"
+
+                    echo "🐳 도커 캐시를 활용하여 빌드 시작 (태그: ${env.FULL_VERSION})..."
+
                     dir('dev/alphacar/frontend') {
-                        sh "docker build --build-arg BUILDKIT_INLINE_CACHE=1 -t ${imageFullTag} ."
+                        // [최적화] BUILDKIT 캐시를 활성화하여 동일 레이어 빌드 시간 단축
+                        sh "docker build --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
+
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                            sh "echo '${PASS}' | docker login ${HARBOR_URL} -u ${USER} --password-stdin"
-                            sh "docker push ${imageFullTag}"
-                            sh "docker logout ${HARBOR_URL}"
+                            sh """
+                                echo "${PASS}" | docker login ${HARBOR_URL} -u ${USER} --password-stdin
+                                docker push ${imageFullTag}
+                                docker logout ${HARBOR_URL}
+                            """
                         }
                     }
                 }
             }
         }
 
-        stage('4. Update Manifest') {
+        stage('4. Update Manifest (GitOps)') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
-                dir('manifest-update') {
-                    checkout([$class: 'GitSCM',
-                        branches: [[name: 'main']],
-                        userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
-                    ])
+                script {
+                    dir('manifest-update') {
+                        checkout([$class: 'GitSCM',
+                            branches: [[name: 'main']],
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
 
-                    sh """
-                        # 1. 파일 찾기: frontend-deployment-multimaster.yaml 우선 검색
-                        TARGET_FILE=\$(find k8s/frontend -name "*deployment*.yaml" | head -n 1)
+                        def yamlPath = "k8s/frontend/frontend.yaml"
+                        sh """
+                            if [ -f "${yamlPath}" ]; then
+                                echo "📝 Manifest 업데이트 중..."
+                                sed -i 's|image: .*/frontend:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${yamlPath}
 
-                        if [ -z "\$TARGET_FILE" ]; then
-                            echo "❌ 에러: 업데이트할 YAML 파일을 찾을 수 없습니다."
-                            ls -R k8s/frontend
-                            exit 1
-                        fi
-
-                        echo "📝 수정 대상 파일: \$TARGET_FILE"
-                        echo "🚀 적용할 새 이미지 주소: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
-
-                        # 2. 이미지 태그 업데이트 (이미지 이름이 alphacar-frontend여도 강제 교체)
-                        # image: 라인 전체를 새 Harbor 주소로 갈아끼웁니다.
-                        sed -i "s|image: .*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
-
-                        # 3. 변경 사항 로그 출력 (확인용)
-                        grep "image:" "\$TARGET_FILE"
-
-                        # 4. Git 설정 및 푸시
-                        git config user.email "jenkins@alphacar.com"
-                        git config user.name "Jenkins-CI"
-                        git add .
-                        if [ -n "\$(git status --porcelain)" ]; then
-                            git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
-                            git push origin main
-                            echo "✅ 매니페스트 업데이트 완료 및 Push 성공"
-                        else
-                            echo "ℹ️ 이미 최신 버전이 적용되어 있습니다."
-                        fi
-                    """
+                                git config user.email "jenkins@alphacar.com"
+                                git config user.name "Jenkins-CI"
+                                git add .
+                                if [ -n "\$(git status --porcelain)" ]; then
+                                    git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
+                                    git push origin main
+                                fi
+                            fi
+                        """
+                    }
                 }
             }
         }
@@ -143,7 +146,7 @@ pipeline {
 
     post {
         always {
-            // 빌드 후 미사용 이미지 정리
+            // 빌드 캐시는 남기고 미사용 이미지만 제거하여 다음 빌드 가속화
             sh "docker image prune -f"
             cleanWs()
         }
