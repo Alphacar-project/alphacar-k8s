@@ -1,7 +1,7 @@
 pipeline {
     agent any
 
-    // 플러그인 에러를 방지하기 위해 기본 트리거만 사용
+    // 젠킨스 기본 트리거 사용 (플러그인 에러 방지)
     triggers {
         githubPush()
     }
@@ -19,10 +19,7 @@ pipeline {
 
     stages {
         stage('1. Prepare') {
-            // [핵심] 프론트엔드 소스 폴더 변경 시에만 실행
-            when {
-                changeset "dev/alphacar/frontend/**"
-            }
+            when { changeset "dev/alphacar/frontend/**" } // 프론트 폴더 변경 시에만 실행
             steps {
                 cleanWs()
                 checkout scm
@@ -46,20 +43,16 @@ pipeline {
         }
 
         stage('2. Security & Analysis') {
-            when {
-                changeset "dev/alphacar/frontend/**"
-            }
+            when { changeset "dev/alphacar/frontend/**" }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
-                        // SonarQube 분석 (캐시 활성화)
                         withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                             sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.analysis.cache=true -Dsonar.sources=."
                         }
-                        
-                        // [보안] 4개의 취약점(Critical 2, High 2) 해결 여부 확인
-                        echo "🛡️ Trivy 스캔 중 (Next.js 15.5.9 패치 확인)..."
+                        // [보안] Trivy 스캔 (image_189688 기준 취약점 4개 해결 확인용)
+                        echo "🛡️ Trivy 보안 스캔 중..."
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
                     }
                 }
@@ -67,16 +60,13 @@ pipeline {
         }
 
         stage('3. 고속 Docker Build & Push') {
-            when {
-                changeset "dev/alphacar/frontend/**"
-            }
+            when { changeset "dev/alphacar/frontend/**" }
             steps {
                 script {
                     def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     dir('dev/alphacar/frontend') {
-                        // BUILDKIT 캐시 사용하여 빌드 시간 단축
+                        // BUILDKIT 캐시 사용하여 빌드 속도 향상
                         sh "docker build --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
-                        
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                             sh "echo '${PASS}' | docker login ${HARBOR_URL} -u ${USER} --password-stdin"
                             sh "docker push ${imageFullTag}"
@@ -87,17 +77,11 @@ pipeline {
         }
 
         stage('4. Update Manifest') {
-            when {
-                changeset "dev/alphacar/frontend/**"
-            }
+            when { changeset "dev/alphacar/frontend/**" }
             steps {
                 script {
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM', 
-                            branches: [[name: 'main']], 
-                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
-                        ])
-                        
+                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]])
                         sh "sed -i 's|image: .*/frontend:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|' k8s/frontend/frontend.yaml"
                         sh """
                             git config user.email "jenkins@alphacar.com"
@@ -111,13 +95,6 @@ pipeline {
                     }
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            sh "docker image prune -f"
-            cleanWs()
         }
     }
 }
