@@ -1,7 +1,7 @@
 pipeline {
     agent any
 
-    // [자동화] GitHub Push 신호를 받으면 자동으로 빌드를 시작합니다.
+    // GitHub Push 이벤트를 감지하여 자동으로 빌드를 트리거합니다.
     triggers {
         githubPush()
     }
@@ -18,7 +18,7 @@ pipeline {
         HARBOR_PROJECT  = 'alphacar'
         IMAGE_NAME      = 'frontend'
         HARBOR_CRED_ID  = 'harbor-cred'
-        GIT_CREDENTIAL_ID = 'github-cred'
+        GIT_CREDENTIAL_ID = 'github-cred' // 젠킨스 Credentials에 등록된 ID
 
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
@@ -48,7 +48,7 @@ pipeline {
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
 
-                    // [중복 체크] Harbor에 이미 이미지가 있는지 확인
+                    // [중복 체크] Harbor에 이미지가 이미 있는지 확인하여 빌드 시간 단축
                     withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                         def harborCheck = sh(
                             script: "curl -s -u '${USER}:${PASS}' -I 'http://${HARBOR_URL}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${env.FULL_VERSION}' | grep 'HTTP/1.1 200' || true",
@@ -71,7 +71,7 @@ pipeline {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
-                        // SonarQube 분석 (타임아웃 및 메모리 최적화)
+                        // SonarQube 분석 (타임아웃을 10분으로 늘려 안정성 확보)
                         withEnv(["SONAR_SCANNER_OPTS=-Xmx1024m"]) {
                             withSonarQubeEnv("${env.SONARQUBE_NAME}") {
                                 sh """
@@ -83,7 +83,7 @@ pipeline {
                                 """
                             }
                         }
-                        // Trivy 보안 스캔
+                        // Trivy 보안 스캔 리포트 생성
                         sh "/tmp/trivy fs --severity CRITICAL,HIGH --format table --output trivy_report.txt ."
                     }
                 }
@@ -103,7 +103,7 @@ pipeline {
                     echo "🐳 도커 빌드 시작: ${imageFullTag}"
 
                     dir('dev/alphacar/frontend') {
-                        // [에러 해결] BuildKit 에러 방지를 위해 기본 빌더 사용
+                        // Alpine 환경의 SWC 호환성을 위해 기본 빌더 사용
                         sh "docker build -f Dockerfile -t ${imageFullTag} ."
 
                         withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -128,33 +128,36 @@ pipeline {
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
 
-                        sh """
-                            TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
+                        // [핵심] 인증 정보를 쉘 환경으로 가져와서 사용합니다.
+                        withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                            sh """
+                                TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
 
-                            if [ -f "\$TARGET_FILE" ]; then
-                                echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
-                                # 이미지 이름(alphacar-frontend 등)에 관계없이 새 Harbor 주소로 교체
-                                sed -i "s|image: .*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
+                                if [ -f "\$TARGET_FILE" ]; then
+                                    echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
+                                    # 기존 이미지 주소와 태그를 새 버전으로 치환
+                                    sed -i "s|image: .*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
 
-                                git config user.email "jenkins@alphacar.com"
-                                git config user.name "Jenkins-CI"
-                                git add .
-                                
-                                if [ -n "\$(git status --porcelain)" ]; then
-                                    git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
-                                    
-                                    # [핵심 해결책] Detached HEAD 상태에서도 원격 main 브랜치로 푸시할 수 있도록 설정
-                                    git push origin HEAD:main
-                                    
-                                    echo "✅ GitOps 레포지토리 푸시 성공"
+                                    git config user.email "jenkins@alphacar.com"
+                                    git config user.name "Jenkins-CI"
+                                    git add .
+
+                                    if [ -n "\$(git status --porcelain)" ]; then
+                                        git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
+
+                                        # [인증 해결] 토큰을 사용하여 원격 레포지토리에 푸시합니다.
+                                        git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+
+                                        echo "✅ GitOps 레포지토리 푸시 성공"
+                                    else
+                                        echo "ℹ️ 변경 사항이 없습니다."
+                                    fi
                                 else
-                                    echo "ℹ️ 변경 사항이 없습니다."
+                                    echo "❌ 에러: \$TARGET_FILE 파일을 찾을 수 없습니다."
+                                    exit 1
                                 fi
-                            else
-                                echo "❌ 에러: \$TARGET_FILE 파일을 찾을 수 없습니다."
-                                exit 1
-                            fi
-                        """
+                            """
+                        }
                     }
                 }
             }
@@ -163,6 +166,7 @@ pipeline {
 
     post {
         always {
+            // 보안 스캔 결과물을 젠킨스 대시보드에서 볼 수 있게 아카이빙합니다.
             archiveArtifacts artifacts: 'dev/alphacar/frontend/trivy_report.txt', allowEmptyArchive: true
             sh "docker image prune -f"
             cleanWs()
