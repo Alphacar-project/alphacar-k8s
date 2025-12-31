@@ -1,0 +1,214 @@
+pipeline {
+    agent any
+
+    // [자동화 분리] 백엔드 폴더(dev/alphacar/backend) 변경 시에만 빌드 수행
+    triggers {
+        GenericTrigger(
+            genericVariables: [
+                [key: 'changedFiles', value: '$.commits[*].modified[*]']
+            ],
+            regexpFilterText: '$changedFiles',
+            regexpFilterExpression: '.*dev/alphacar/backend/.*', 
+            token: 'backend-token' 
+        )
+    }
+
+    parameters {
+        choice(name: 'ACTION',
+               choices: ['build_and_deploy', 'skip_build'],
+               description: '백엔드 빌드 및 배포를 진행하시겠습니까?')
+        choice(name: 'DEPLOY_STRATEGY',
+               choices: ['blue-green', 'canary'],
+               description: '배포 전략 선택')
+        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
+    }
+
+    environment {
+        HARBOR_URL      = '192.168.0.170:30000'
+        HARBOR_PROJECT  = 'alphacar'
+        IMAGE_NAME      = 'alphacar-main'  // main-backend 서비스
+        HARBOR_CRED_ID  = 'harbor-cred'
+        GIT_CREDENTIAL_ID = 'github-cred'
+        SONARQUBE_NAME = 'SonarQube'
+        SONAR_HOST_URL = 'http://192.168.0.170:32000'
+        MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+        K8S_NAMESPACE = 'apc-be-ns'
+        ROLLOUT_NAME = 'main-backend'
+    }
+
+    stages {
+        stage('1. Prepare') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                cleanWs()
+                checkout scm
+                script {
+                    def baseVer = "1.0"
+                    def versionPath = 'dev/alphacar/backend/version.txt'
+                    if (fileExists(versionPath)) {
+                        baseVer = readFile(versionPath).trim()
+                    }
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    
+                    // Trivy 설치 체크
+                    sh '''
+                        if ! command -v trivy &> /dev/null; then
+                            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                        fi
+                    '''
+                    
+                    // kubectl 및 argo-rollouts CLI 확인
+                    sh '''
+                        if ! command -v kubectl &> /dev/null; then
+                            echo "kubectl이 설치되어 있지 않습니다. 설치가 필요합니다."
+                            exit 1
+                        fi
+                        if ! command -v kubectl-argo-rollouts &> /dev/null; then
+                            echo "kubectl-argo-rollouts CLI 설치 중..."
+                            curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+                            chmod +x ./kubectl-argo-rollouts-linux-amd64
+                            sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts || mv ./kubectl-argo-rollouts-linux-amd64 /tmp/kubectl-argo-rollouts
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('2. Security & Analysis') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def scannerHome = tool name: 'sonar-scanner'
+                    dir('dev/alphacar/backend') {
+                        // SonarQube 분석 (캐시 활성화)
+                        withSonarQubeEnv("${env.SONARQUBE_NAME}") {
+                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-backend -Dsonar.analysis.cache=true -Dsonar.sources=."
+                        }
+                        
+                        // 백엔드 취약점 스캔
+                        echo "🛡️ 백엔드 소스 코드 취약점 스캔 중..."
+                        sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
+                    }
+                }
+            }
+        }
+
+        stage('3. 고속 Docker Build & Push') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def imageFullTag = "${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                    dir('dev/alphacar/backend') {
+                        // BUILDKIT 캐시 사용하여 빌드 속도 향상
+                        sh "docker build --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
+                        
+                        withCredentials([usernamePassword(credentialsId: HARBOR_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                            sh "echo '${PASS}' | docker login ${HARBOR_URL} -u ${USER} --password-stdin"
+                            sh "docker push ${imageFullTag}"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('4. Update Rollout Manifest') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    dir('manifest-update') {
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+                        
+                        // Argo Rollouts YAML 경로에 맞춰 이미지 태그 업데이트
+                        def rolloutPath = "k8s/cicd/argorollouts/main-backend-rollout-bluegreen.yaml"
+                        if (params.DEPLOY_STRATEGY == 'canary') {
+                            rolloutPath = "k8s/cicd/argorollouts/main-backend-rollout.yaml"
+                        }
+                        
+                        sh """
+                            if [ -f "${rolloutPath}" ]; then
+                                # 이미지 태그 업데이트
+                                sed -i 's|image: .*/${IMAGE_NAME}:.*|image: ${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${rolloutPath}
+                                
+                                git config user.email "jenkins@alphacar.com"
+                                git config user.name "Jenkins-CI"
+                                git add .
+                                if [ -n "\$(git status --porcelain)" ]; then
+                                    git commit -m "Update ${ROLLOUT_NAME} image to ${env.FULL_VERSION} [skip ci]"
+                                    git push origin main
+                                fi
+                            else
+                                echo "⚠️ Rollout 파일을 찾을 수 없습니다: ${rolloutPath}"
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('5. Deploy with Argo Rollouts') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    dir('manifest-update') {
+                        // Argo Rollouts를 사용한 배포
+                        sh """
+                            echo "🚀 Argo Rollouts를 사용한 Blue-Green 배포 시작..."
+                            
+                            # Rollout 적용
+                            kubectl apply -f k8s/cicd/argorollouts/main-backend-rollout-bluegreen.yaml -n ${K8S_NAMESPACE}
+                            
+                            # 배포 상태 확인 (최대 5분 대기)
+                            timeout 300 bash -c 'until kubectl argo rollouts get rollout ${ROLLOUT_NAME} -n ${K8S_NAMESPACE} | grep -q "Healthy"; do sleep 5; done' || true
+                            
+                            # 배포 상태 출력
+                            kubectl argo rollouts get rollout ${ROLLOUT_NAME} -n ${K8S_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('6. Promote (Optional)') {
+            when { 
+                expression { 
+                    params.ACTION == 'build_and_deploy' && 
+                    params.DEPLOY_STRATEGY == 'blue-green' 
+                } 
+            }
+            steps {
+                script {
+                    echo "⏸️ Blue-Green 배포가 Preview 상태로 대기 중입니다."
+                    echo "📊 Argo Rollouts 대시보드에서 확인 후 수동으로 Promote하세요:"
+                    echo "   kubectl argo rollouts promote ${ROLLOUT_NAME} -n ${K8S_NAMESPACE}"
+                    echo ""
+                    echo "또는 자동 승인을 원하시면 다음 단계를 활성화하세요."
+                    
+                    // 자동 승인을 원하는 경우 아래 주석 해제
+                    // sh "kubectl argo rollouts promote ${ROLLOUT_NAME} -n ${K8S_NAMESPACE}"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh "docker image prune -f"
+            cleanWs()
+        }
+        success {
+            script {
+                echo "✅ 배포 완료!"
+                echo "📊 Rollout 상태 확인:"
+                sh "kubectl argo rollouts get rollout ${ROLLOUT_NAME} -n ${K8S_NAMESPACE} || true"
+            }
+        }
+        failure {
+            echo "❌ 배포 실패! 로그를 확인하세요."
+        }
+    }
+}
+

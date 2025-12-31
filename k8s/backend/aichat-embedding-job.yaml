@@ -1,0 +1,107 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aichat-embedding-job
+  namespace: apc-be-ns
+spec:
+  ttlSecondsAfterFinished: 3600  # Job 완료 후 1시간 후 자동 삭제
+  backoffLimit: 3  # 최대 3번 재시도
+  template:
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      restartPolicy: Never
+      containers:
+      - name: aichat-embedding
+        image: 192.168.0.170:30000/alphacar/alphacar-aichat:1.1.0
+        command: ["sh"]
+        args: ["-c", "cd /app/aichat && if [ -f dist/scripts/ingest-data.js ]; then echo '✅ 빌드된 스크립트 발견: dist/scripts/ingest-data.js'; node dist/scripts/ingest-data.js; elif [ -f dist/scripts/ingest-data.ts ]; then echo '✅ TypeScript 스크립트 발견: dist/scripts/ingest-data.ts'; npm install ts-node tsconfig-paths mongodb --no-save --legacy-peer-deps && cd /app/aichat && NODE_PATH=/app/aichat/node_modules:/app/node_modules:/app/aichat/node_modules/mongoose/node_modules:$NODE_PATH npx ts-node --transpile-only --project tsconfig.json dist/scripts/ingest-data.ts; elif [ -f scripts/ingest-data.ts ]; then echo '⚠️ TypeScript 스크립트 발견 (scripts 폴더): scripts/ingest-data.ts'; npm install ts-node tsconfig-paths mongodb --no-save --legacy-peer-deps && cd /app/aichat && NODE_PATH=/app/aichat/node_modules:/app/node_modules:/app/aichat/node_modules/mongoose/node_modules:$NODE_PATH npx ts-node --transpile-only --project tsconfig.json scripts/ingest-data.ts; else echo '❌ 스크립트를 찾을 수 없습니다.'; echo '현재 디렉토리:'; pwd; echo '파일 목록:'; ls -la; echo 'dist/scripts 내용:'; ls -la dist/scripts/ 2>/dev/null || echo 'dist/scripts 없음'; echo 'scripts 내용:'; ls -la scripts/ 2>/dev/null || echo 'scripts 없음'; exit 1; fi"]
+        env:
+        - name: PORT
+          value: "4000"
+        - name: SERVICE_NAME
+          value: "aichat-backend"
+        # ConfigMap (apc-be-config) 참조
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: AWS_REGION
+        - name: BEDROCK_GUARDRAIL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_GUARDRAIL_ID
+        - name: BEDROCK_GUARDRAIL_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_GUARDRAIL_VERSION
+        - name: BEDROCK_EMBEDDING_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_EMBEDDING_MODEL_ID
+        - name: BEDROCK_LLM_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_LLM_MODEL_ID
+        # AI 전용 Secret (apc-aichat-secret) 참조
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_DB_NAME
+        # AWS 인증 Secret (apc-aichat-secret) 참조
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: AWS_SECRET_ACCESS_KEY
+        volumeMounts:
+        - name: vector-store
+          mountPath: /app/vector_store
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      volumes:
+      - name: vector-store
+        emptyDir: {}
+        # 임시로 EmptyDir 사용 (Longhorn 볼륨 마운트 문제 해결 전까지)
+        # persistentVolumeClaim:
+        #   claimName: aichat-vector-store-pvc

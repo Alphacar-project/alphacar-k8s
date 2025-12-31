@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: community-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1  # 불필요한 배포 이력 정리
+  selector:
+    matchLabels:
+      app: community-backend
+  template:
+    metadata:
+      labels:
+        app: community-backend
+    spec:
+      serviceAccountName: community-backend-sa
+      # ✅ EKS 노드 IAM Role 권한을 사용하므로 Harbor 시크릿은 제거했습니다.
+      containers:
+      - name: community-backend
+        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
+        # 빌드 및 푸시하신 버전에 맞춰 태그(1.0.1 등)를 지정하세요.
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-community:1.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3005
+          name: http
+        env:
+        - name: PORT
+          value: "3005"
+        - name: SERVICE_NAME
+          value: "community-backend"
+        # [ConfigMap] apc-be-config 참조 유지
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MARIADB_PORT
+        # [Secret] apc-be-secret 참조 유지
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_DB_NAME
+
+        # ✅ Global Prefix('api') 반영에 따른 헬스체크 경로 수정
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 3005
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 3005
+          initialDelaySeconds: 15
+          periodSeconds: 5
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: community-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: community-backend
+  ports:
+  - name: http
+    port: 3005
+    targetPort: 3005
+    protocol: TCP
+  # ALB Ingress를 통해 트래픽을 받으므로 ClusterIP 유지
+  type: ClusterIP

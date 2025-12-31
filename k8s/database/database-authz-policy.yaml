@@ -1,0 +1,61 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"security.istio.io/v1beta1","kind":"AuthorizationPolicy","metadata":{"annotations":{},"labels":{"component":"database","policy":"istio-authz"},"name":"database-authz-policy","namespace":"apc-db-ns"},"spec":{"action":"ALLOW","rules":[{"from":[{"source":{"namespaces":["apc-be-ns"]}}],"to":[{"operation":{"ports":["27017","3306","6379"]}}]},{"from":[{"source":{"namespaces":["apc-db-ns"]}}],"to":[{"operation":{"ports":["27017","3306","6379"]}}]}],"selector":{"matchLabels":{"component":"database"}}}}
+  creationTimestamp: "2025-12-23T15:00:55Z"
+  generation: 2
+  labels:
+    component: database
+    policy: istio-authz
+  name: database-authz-policy
+  namespace: apc-db-ns
+  resourceVersion: "2997554"
+  uid: d41ee521-5ba2-4e24-b934-62c87509aee8
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - apc-be-ns
+    to:
+    - operation:
+        ports:
+        - "27017"
+        - "3306"
+        - "6379"
+  - from:
+    - source:
+        namespaces:
+        - apc-db-ns
+    to:
+    - operation:
+        ports:
+        - "27017"
+        - "3306"
+        - "6379"
+  - from:
+    - source:
+        namespaces:
+        - apc-ek-ns
+    to:
+    - operation:
+        ports:
+        - "27017"
+        - "3306"
+        - "6379"
+  - from:
+    - source:
+        namespaces:
+        - apc-striming-ns
+    to:
+    - operation:
+        ports:
+        - "27017"
+        - "3306"
+        - "6379"
+  selector:
+    matchLabels:
+      component: database

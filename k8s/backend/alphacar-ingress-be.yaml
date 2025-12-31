@@ -1,0 +1,177 @@
+# alphacar-ingress-be.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alphacar-ingress-be
+  namespace: apc-be-ns
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/group.name: alphacar-main-alb # 위와 동일한 그룹명
+spec:
+  ingressClassName: alb
+  rules:
+  - host: alphacar.cloud
+    http:
+      paths:
+      # [1] Chat Backend
+      - path: /api/chat
+        pathType: Prefix
+        backend:
+          service:
+            name: aichat-backend
+            port:
+              number: 4000
+
+      # [1-0] MyPage Backend (Auth & API)
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: mypage-backend
+            port:
+              number: 3006
+      - path: /api/mypage
+        pathType: Prefix
+        backend:
+          service:
+            name: mypage-backend
+            port:
+              number: 3006
+
+      # [1-1] Main Backend - 구체적인 차량 메타데이터 (3002)
+      - path: /api/vehicles/makers
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/vehicles/models
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/vehicles/base-trims
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/vehicles/trims
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+
+      # [1-1-1] Quote Backend - 구체적인 상세 정보 (3003)
+      - path: /api/vehicles/detail
+        pathType: Prefix
+        backend:
+          service:
+            name: quote-backend
+            port:
+              number: 3003
+      - path: /api/vehicles/compare-data
+        pathType: Prefix
+        backend:
+          service:
+            name: quote-backend
+            port:
+              number: 3003
+
+      # [2] Main Backend 핵심 API (3002)
+      - path: /api/sales
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/brands
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/main
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/history
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /api/favorites
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+
+      # [2-1] Quote Backend 핵심 API (3003)
+      - path: /api/vehicles
+        pathType: Prefix
+        backend:
+          service:
+            name: quote-backend
+            port:
+              number: 3003
+      - path: /api/estimate
+        pathType: Prefix
+        backend:
+          service:
+            name: quote-backend
+            port:
+              number: 3003
+      - path: /api/quote
+        pathType: Prefix
+        backend:
+          service:
+            name: quote-backend
+            port:
+              number: 3003
+
+      # [4, 5] Search & News
+      - path: /api/search
+        pathType: Prefix
+        backend:
+          service:
+            name: search-backend
+            port:
+              number: 3007
+      - path: /api/news
+        pathType: Prefix
+        backend:
+          service:
+            name: news-backend
+            port:
+              number: 3008
+
+      # [8] Main Backend 직접 요청 (Rewrite 없이 전달)
+      - path: /main
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002
+      - path: /brands
+        pathType: Prefix
+        backend:
+          service:
+            name: main-backend
+            port:
+              number: 3002

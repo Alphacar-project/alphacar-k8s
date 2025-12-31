@@ -1,0 +1,68 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"annotations":{},"name":"database-strict-policy","namespace":"apc-db-ns"},"spec":{"egress":[{"ports":[{"port":53,"protocol":"UDP"}],"to":[{"namespaceSelector":{}}]},{"ports":[{"port":27017,"protocol":"TCP"}],"to":[{"namespaceSelector":{"matchLabels":{"name":"apc-db-ns"}}}]}],"ingress":[{"from":[{"namespaceSelector":{"matchLabels":{"name":"apc-be-ns"}}}],"ports":[{"port":27017,"protocol":"TCP"}]},{"from":[{"namespaceSelector":{"matchLabels":{"name":"apc-be-ns"}}}],"ports":[{"port":6379,"protocol":"TCP"}]},{"from":[{"namespaceSelector":{"matchLabels":{"name":"apc-db-ns"}}}],"ports":[{"port":27017,"protocol":"TCP"}]}],"podSelector":{"matchLabels":{"component":"database"}},"policyTypes":["Ingress","Egress"]}}
+  creationTimestamp: "2025-12-25T16:54:52Z"
+  generation: 2
+  name: database-strict-policy
+  namespace: apc-db-ns
+  resourceVersion: "2997463"
+  uid: 93a1dc10-a5f9-4532-a92e-78739d038b03
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    to:
+    - namespaceSelector: {}
+  - ports:
+    - port: 27017
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-db-ns
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-be-ns
+    ports:
+    - port: 27017
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-be-ns
+    ports:
+    - port: 6379
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-db-ns
+    ports:
+    - port: 27017
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-ek-ns
+    ports:
+    - port: 27017
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: apc-striming-ns
+    ports:
+    - port: 27017
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      component: database
+  policyTypes:
+  - Ingress
+  - Egress

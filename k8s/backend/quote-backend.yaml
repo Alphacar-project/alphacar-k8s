@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quote-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: quote-backend
+  template:
+    metadata:
+      labels:
+        app: quote-backend
+    spec:
+      serviceAccountName: quote-backend-sa
+      # ✅ EKS 노드 IAM Role 권한을 사용하므로 Harbor 시크릿은 제거했습니다.
+      containers:
+      - name: quote-backend
+        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
+        # (코드 수정 후 빌드하신 1.0.1 버전을 기준으로 설정했습니다)
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-quote:1.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3003
+          name: http
+        env:
+        - name: PORT
+          value: "3003"
+        - name: SERVICE_NAME
+          value: "quote-backend"
+
+        # [ConfigMap] apc-be-config 참조
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+        - name: ESTIMATE_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: ESTIMATE_DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+
+        # [Secret] apc-be-secret 참조
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_DB_NAME
+        - name: ESTIMATE_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_USER
+        - name: ESTIMATE_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_PASS
+        - name: ESTIMATE_DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_DB_NAME
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: JWT_SECRET
+
+        # ✅ 기존 MongoDB URI 조합 로직 유지
+        - name: MONGO_URI
+          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
+        - name: MONGODB_URI
+          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
+        - name: ESTIMATE_MONGO_URI
+          value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
+
+        # ✅ Global Prefix('api') 반영에 따른 프로브 경로 수정
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 3003
+          initialDelaySeconds: 45
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 3003
+          initialDelaySeconds: 20
+          periodSeconds: 10
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m" # CPU limit은 0.5로 조정하여 안정성 확보
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quote-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: quote-backend
+  ports:
+  - port: 3003
+    targetPort: 3003
+    protocol: TCP
+    name: http
+  # ALB Ingress를 통해 트래픽을 받으므로 ClusterIP 유지
+  type: ClusterIP

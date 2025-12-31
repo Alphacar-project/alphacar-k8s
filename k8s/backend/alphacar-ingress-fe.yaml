@@ -1,0 +1,40 @@
+# alphacar-ingress-fe.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alphacar-ingress-fe
+  namespace: apc-fe-ns
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # ✅ 중요: 모든 Ingress를 이 그룹 이름으로 묶어 하나의 ALB를 공유합니다.
+    alb.ingress.kubernetes.io/group.name: alphacar-main-alb
+    # SSL(HTTPS)을 사용하려면 아래 주석을 풀고 ARN을 입력하세요.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-2:382045063773:certificate/498636a3-7ccb-4f48-820f-2f4e8948ae41
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+spec:
+  ingressClassName: alb
+  rules:
+  - host: alphacar.cloud  # 👈 도메인을 명시하는 것을 권장합니다
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 8000
+  - host: www.alphacar.cloud # 👈 www도 같이 쓰고 싶다면 추가
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 8000

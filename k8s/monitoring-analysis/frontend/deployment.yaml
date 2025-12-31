@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-analysis-frontend
+  namespace: apc-obsv-ns
+  labels:
+    app: monitoring-analysis-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-analysis-frontend
+  template:
+    metadata:
+      labels:
+        app: monitoring-analysis-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: 192.168.0.170:30000/aiobsv/monitoring-analysis-frontend:latest
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: REACT_APP_API_URL
+          value: "http://monitoring-analysis-backend:5000"
+        - name: REACT_APP_WS_URL
+          value: "ws://monitoring-analysis-backend:5000"
+        volumeMounts:
+        - name: frontend-config
+          mountPath: /etc/nginx/conf.d
+        # [삭제] 아래 2줄 삭제 (이미지 내의 파일을 가려버림)
+        # - name: static-files
+        #   mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: frontend-config
+        configMap:
+          name: monitoring-analysis-frontend-config
+      # [삭제] 아래 2줄 삭제
+      # - name: static-files
+      #   emptyDir: {}

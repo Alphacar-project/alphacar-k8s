@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fix-containerd-http
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: fix-containerd-http
+  template:
+    metadata:
+      labels:
+        name: fix-containerd-http
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: fix-config
+        image: alpine:latest
+        command:
+        - sh
+        - -c
+        - |
+          REGISTRY="192.168.0.170:30000"
+          
+          # 설정 파일 확인
+          if [ ! -f /host/etc/containerd/config.toml ]; then
+            echo "설정 파일이 없습니다."
+            exit 1
+          fi
+          
+          # 기존 설정 확인
+          if grep -q "endpoint = \[\"http://$REGISTRY\"\]" /host/etc/containerd/config.toml; then
+            echo "이미 HTTP 설정이 있습니다."
+          else
+            echo "HTTP 설정을 추가합니다..."
+            
+            # mirrors 섹션 찾기 또는 생성
+            if ! grep -q "\[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors\]" /host/etc/containerd/config.toml; then
+              # registry 섹션 찾아서 mirrors 추가
+              sed -i '/\[plugins."io.containerd.grpc.v1.cri".registry\]/a\[plugins."io.containerd.grpc.v1.cri".registry.mirrors]' /host/etc/containerd/config.toml
+            fi
+            
+            # 기존 설정 제거 (있다면)
+            sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"$REGISTRY\"\]/,/endpoint =/d" /host/etc/containerd/config.toml
+            
+            # HTTP endpoint 추가
+            sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors\]/a\        [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"$REGISTRY\"]\n          endpoint = [\"http://$REGISTRY\"]" /host/etc/containerd/config.toml
+            
+            # configs 섹션 찾기 또는 생성
+            if ! grep -q "\[plugins.\"io.containerd.grpc.v1.cri\".registry.configs\]" /host/etc/containerd/config.toml; then
+              sed -i '/\[plugins."io.containerd.grpc.v1.cri".registry.mirrors\]/a\[plugins."io.containerd.grpc.v1.cri".registry.configs]' /host/etc/containerd/config.toml
+            fi
+            
+            # 기존 TLS 설정 제거 (있다면)
+            sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"$REGISTRY\"\]/,/insecure_skip_verify =/d" /host/etc/containerd/config.toml
+            
+            # TLS insecure 설정 추가
+            sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.configs\]/a\        [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"$REGISTRY\".tls]\n          insecure_skip_verify = true" /host/etc/containerd/config.toml
+            
+            echo "설정 추가 완료"
+          fi
+          
+          # 설정 확인
+          echo "=== 설정 확인 ==="
+          grep -A 3 "$REGISTRY" /host/etc/containerd/config.toml
+          
+          # containerd 재시작
+          echo "containerd 재시작 중..."
+          chroot /host systemctl daemon-reload
+          chroot /host systemctl restart containerd
+          sleep 2
+          chroot /host systemctl status containerd --no-pager | head -5
+          
+          echo "완료"
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-etc
+          mountPath: /host/etc
+        - name: host-run
+          mountPath: /host/run
+      volumes:
+      - name: host-etc
+        hostPath:
+          path: /etc
+      - name: host-run
+        hostPath:
+          path: /run
+      tolerations:
+      - operator: Exists
+

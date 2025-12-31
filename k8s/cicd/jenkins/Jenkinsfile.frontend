@@ -1,0 +1,163 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACTION',
+               choices: ['build_and_deploy', 'skip_build'],
+               description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
+        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
+    }
+
+    environment {
+        ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
+        AWS_REGION = 'ap-northeast-2'
+        IMAGE_NAME = 'alphacar/frontend'
+        GIT_CREDENTIAL_ID = 'github-cred'
+        SONARQUBE_NAME = 'SonarQube'
+        SONAR_HOST_URL = 'http://192.168.0.170:32000'
+        MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+    }
+
+    stages {
+        stage('1. Prepare') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                cleanWs()
+                checkout scm
+                script {
+                    // 디스크 공간 확보를 위한 Docker 리소스 정리
+                    sh '''
+                        echo "🧹 빌드 전 Docker 리소스 정리 중..."
+                        docker image prune -f || true
+                        docker container prune -f || true
+                        docker builder prune -f || true
+                        echo "✅ Docker 리소스 정리 완료"
+                    '''
+                    
+                    def baseVer = "1.0"
+                    def versionPath = 'dev/alphacar/frontend/version.txt'
+                    try {
+                        if (fileExists(versionPath)) {
+                            baseVer = readFile(versionPath).trim()
+                        }
+                    } catch (e) {
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
+                    }
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    echo "📦 빌드 버전: ${env.FULL_VERSION}"
+                }
+            }
+        }
+
+        stage('2. Security & Quality Analysis') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def scannerHome = tool name: 'sonar-scanner'
+                    dir('dev/alphacar/frontend') {
+                        withEnv(["SONAR_SCANNER_OPTS=-Xmx1024m"]) {
+                            // SonarQube 분석
+                            withSonarQubeEnv('sonarqube') {
+                                sh """
+                                    ${scannerHome}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=alphacar-frontend \
+                                    -Dsonar.sources=. \
+                                    -Dsonar.host.url=http://localhost:9000 \
+                                    -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 \
+                                    -Dsonar.ws.timeout=600
+                                """
+                            }
+                        }
+                        sh "/tmp/trivy fs --severity CRITICAL,HIGH --format table --output trivy_report.txt ."
+                    }
+                }
+            }
+        }
+
+        stage('3. Docker Build & Push to ECR') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                    echo "🐳 도커 빌드 시작: ${imageFullTag}"
+
+                    dir('dev/alphacar/frontend') {
+                        sh "docker build -f Dockerfile -t ${imageFullTag} ."
+                        
+                        // AWS ECR 로그인
+                        script {
+                            def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
+                            if (!awsPath || !fileExists(awsPath)) {
+                                error "AWS CLI not found. Please install AWS CLI on the Jenkins server."
+                            }
+                            sh """
+                                ${awsPath} ecr get-login-password --region ${AWS_REGION} | \\
+                                docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            """
+                        }
+                        
+                        sh "docker push ${imageFullTag}"
+                        sh "docker logout ${ECR_REGISTRY}"
+                    }
+                }
+            }
+        }
+
+        stage('4. Update Manifest (GitOps)') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    dir('manifest-update') {
+                        checkout([$class: 'GitSCM',
+                            branches: [[name: 'main']],
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+
+                            withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                            sh """
+                                # 브랜치 확인 및 전환
+                                git checkout -B main || git checkout main
+                                
+                                TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
+
+                                if [ -f "\$TARGET_FILE" ]; then
+                                    echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
+                                    sed -i "s|image: .*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
+
+                                    git config user.email "jenkins@alphacar.com"
+                                    git config user.name "Jenkins-CI"
+                                    git add .
+
+                                    if [ -n "\$(git status --porcelain)" ]; then
+                                        git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
+                                        git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                        echo "✅ GitOps 레포지토리 푸시 성공"
+                                    else
+                                        echo "ℹ️ 변경 사항이 없습니다."
+                                    fi
+                                else
+                                    echo "❌ 에러: \$TARGET_FILE 파일을 찾을 수 없습니다."
+                                    exit 1
+                                fi
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'dev/alphacar/frontend/trivy_report.txt', allowEmptyArchive: true
+            sh """
+                docker image prune -f || true
+                docker container prune -f || true
+                docker builder prune -f || true
+            """
+            cleanWs()
+        }
+    }
+}
+

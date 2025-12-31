@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aichat-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: aichat-backend
+  template:
+    metadata:
+      labels:
+        app: aichat-backend
+    spec:
+      serviceAccountName: aichat-backend-sa
+      # ✅ EKS 노드 IAM Role 권한을 사용하므로 Harbor 시크릿 제거
+      # ✅ 기존 노드 어피니티는 유지하되, EKS 노드 이름에 맞춰 확인이 필요할 수 있습니다.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: NotIn
+                values:
+                - a-worker4
+      containers:
+      - name: aichat-backend
+        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 4000
+          name: http
+        env:
+        - name: PORT
+          value: "4000"
+        - name: SERVICE_NAME
+          value: "aichat-backend"
+        # ConfigMap (apc-be-config) 참조 유지
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: AWS_REGION
+        - name: BEDROCK_GUARDRAIL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_GUARDRAIL_ID
+        - name: BEDROCK_GUARDRAIL_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_GUARDRAIL_VERSION
+        - name: BEDROCK_EMBEDDING_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_EMBEDDING_MODEL_ID
+        - name: BEDROCK_LLM_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: BEDROCK_LLM_MODEL_ID
+        # AI 전용 Secret (apc-aichat-secret) 참조 유지
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: MONGO_DB_NAME
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: apc-aichat-secret
+              key: AWS_SECRET_ACCESS_KEY
+        
+        volumeMounts:
+        - name: vector-store
+          mountPath: /app/vector_store
+
+        # ✅ 기존 임베딩 및 실행 스크립트 유지
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /app/vector_store
+          if [ ! -f /app/vector_store/docstore.json ] || [ ! -s /app/vector_store/docstore.json ] || [ $(wc -c < /app/vector_store/docstore.json) -lt 500 ]; then
+            echo '🔄 벡터 스토어가 없거나 비어있습니다. 임베딩을 시작합니다...'
+            cd /app/aichat
+            if [ -f dist/scripts/ingest-data.js ]; then
+              node dist/scripts/ingest-data.js
+            else
+              echo '❌ 임베딩 스크립트 발견 실패'
+            fi
+            echo '✅ 임베딩 완료'
+          else
+            echo '✅ 벡터 스토어가 이미 존재합니다.'
+          fi
+          node /app/aichat/dist/src/main.js
+
+        # ✅ app.setGlobalPrefix('api') 반영에 따른 헬스체크 경로 수정
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 4000
+          initialDelaySeconds: 60 # 임베딩 시간을 고려하여 대기 시간 충분히 확보
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 4000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: vector-store
+        emptyDir: {} # AWS EFS 연동 전까지 임시 사용 유지
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aichat-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: aichat-backend
+  ports:
+  - port: 4000
+    targetPort: 4000
+    protocol: TCP
+    name: http
+  # ALB 인그레스 뒷단에 위치하므로 ClusterIP 유지
+  type: ClusterIP

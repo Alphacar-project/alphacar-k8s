@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apc-be-config
+  namespace: apc-be-ns
+data:
+  # [수정] 실제 DB 서비스 이름(mongodb)과 네임스페이스(apc-db-ns) 반영
+  MONGO_HOST: "mongodb.apc-db-ns.svc.cluster.local"
+  MONGO_PORT: "27017"
+  
+  # MariaDB는 외부 서비스이므로 외부 IP 사용
+  MARIADB_HOST: "211.46.52.151"
+  MARIADB_PORT: "15432"
+  # Redis는 클러스터 내부 서비스 사용
+  REDIS_HOST: "alphacar-redis.apc-db-ns.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+  # 관측성 설정 (주소 유지)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy.apc-obsv-ns.svc.cluster.local:4317"
+
+  # AWS/AI 설정 (주소 유지)
+  AWS_REGION: "us-east-1"
+  BEDROCK_GUARDRAIL_ID: "nfdfeln14bg7"
+  BEDROCK_GUARDRAIL_VERSION: "DRAFT"
+  BEDROCK_EMBEDDING_MODEL_ID: "amazon.titan-embed-text-v2:0"
+  BEDROCK_LLM_MODEL_ID: "meta.llama3-3-70b-instruct-v1:0"
+
+
+
+
+
+
+

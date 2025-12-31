@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: monitoring-analysis-daily-report
+  namespace: apc-obsv-ns
+spec:
+  timeZone: "Asia/Seoul" # 타임존 추가로 한국시간으로 변환
+  schedule: "0 9 * * *"  # 매일 오전 9시 (출근 시간)
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: monitoring-analysis-report
+        spec:
+          containers:
+          - name: report-generator
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              curl -X POST http://monitoring-analysis-backend:5000/api/reports/generate \
+                -H "Content-Type: application/json" \
+                -d '{"type": "daily", "format": "text"}'
+            env:
+            - name: BACKEND_URL
+              value: "http://monitoring-analysis-backend:5000"
+          restartPolicy: OnFailure
+

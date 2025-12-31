@@ -1,0 +1,18 @@
+# 시크릿 파일 제외
+**/secret.yaml
+**/*secret.yaml
+backend/apc-be-secret.yaml
+backend/alphacar-be-secret.yaml
+backend/alphacar-aichat-secret.yaml
+configmap-secret/secret-aws-bedrock.yaml
+
+# 기타 무시할 파일들
+.DS_Store
+node_modules/
+dist/
+
+# 환경 변수 및 백업 파일 전체 제외
+.env
+.env.*
+*.backup*
+dev/alphacar/deploy/.env*

@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: main-backend
+  template:
+    metadata:
+      labels:
+        app: main-backend
+    spec:
+      serviceAccountName: main-backend-sa
+      # ✅ EKS 노드의 IAM Role을 사용하므로 imagePullSecrets는 제거했습니다.
+      containers:
+      - name: main-backend
+        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
+        # (태그는 새로 빌드하여 푸시하신 1.0.1 또는 latest를 사용하세요)
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-main:1.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3002
+          name: http
+        env:
+        - name: PORT
+          value: "3002"
+        - name: SERVICE_NAME
+          value: "main-backend"
+        # [ConfigMap] apc-be-config 참조 유지
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: REDIS_PORT
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        # [Secret] apc-be-secret 참조 유지
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_DB_NAME
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: JWT_SECRET
+        command: ["node"]
+        args: ["/app/dist/src/main.js"]
+        # ✅ 중요: app.setGlobalPrefix('api')를 적용했으므로 경로를 /api로 수정합니다.
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 3002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 3002
+          initialDelaySeconds: 15
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "200m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m" # CPU limit은 1에서 0.5로 조정하여 자원 효율화
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: main-backend
+  ports:
+  - name: http
+    port: 3002
+    targetPort: 3002
+    protocol: TCP
+  # ✅ ALB 인그레스 뒤에 있으므로 ClusterIP로 충분합니다.
+  type: ClusterIP

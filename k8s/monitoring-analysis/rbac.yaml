@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-analysis-sa
+  namespace: apc-obsv-ns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-analysis-role
+rules:
+# Pod 로그 읽기 권한
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]  
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-analysis-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: monitoring-analysis-sa
+  namespace: apc-obsv-ns
+roleRef:
+  kind: ClusterRole
+  name: monitoring-analysis-role
+  apiGroup: rbac.authorization.k8s.io
+

@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crawler-config
+  namespace: apc-striming-ns
+data:
+  kafka_brokers: "kafka-cluster-kafka-bootstrap.apc-striming-ns.svc.cluster.local:9092"
+  mongodb_uri: "mongodb://triple_user:triple_password@mongodb.apc-db-ns.svc.cluster.local:27017/triple_db?authSource=admin&replicaSet=rs0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler
+  namespace: apc-striming-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crawler
+  template:
+    metadata:
+      labels:
+        app: crawler
+    spec:
+      containers:
+      - name: crawler
+        image: node:20-slim
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "크롤링 스크립트 환경 설정 중..."
+          cd /app/scripts
+          npm init -y
+          npm install kafkajs mongoose --quiet
+          echo "크롤링 스크립트 준비 완료"
+          echo "사용 가능한 스크립트:"
+          ls -la /app/scripts/*.js
+          echo "CSV 파일:"
+          ls -la /app/data/*.csv
+          echo "Kafka Broker: $KAFKA_BROKER"
+          echo "MongoDB URI: $MONGODB_URI"
+          echo "크롤링 스크립트를 실행하려면 kubectl exec로 접속하여 실행하세요"
+          echo "예: kubectl exec -it deployment/crawler -n apc-striming-ns -- node /app/scripts/crawl-danawa-v4-producer.js"
+          sleep infinity
+        env:
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: crawler-config
+              key: kafka_brokers
+        - name: MONGODB_URI
+          valueFrom:
+            configMapKeyRef:
+              name: crawler-config
+              key: mongodb_uri
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: crawler-scripts
+          mountPath: /app/scripts
+          readOnly: true
+        - name: csv-data
+          mountPath: /app/data
+          readOnly: true
+      nodeSelector:
+        kubernetes.io/hostname: a-worker1
+      volumes:
+      - name: crawler-scripts
+        hostPath:
+          path: /home/alphacar/dbbackup/a/core
+          type: Directory
+      - name: csv-data
+        hostPath:
+          path: /home/alphacar/dbbackup/a/core
+          type: Directory

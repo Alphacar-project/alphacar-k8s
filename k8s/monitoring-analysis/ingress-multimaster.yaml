@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-analysis-ingress
+  namespace: apc-obsv-ns
+  annotations:
+    traefik.ingress.kubernetes.io/rule-type: PathPrefix
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: monitoring.192.168.0.178.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: monitoring-analysis-frontend
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: monitoring-analysis-backend
+            port:
+              number: 5000
+

@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: frontend-scaledobject
+  namespace: apc-fe-ns
+spec:
+  scaleTargetRef:
+    name: frontend
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: cpu
+    metricType: Utilization
+    metadata:
+      value: "50"
+  - type: memory
+    metricType: Utilization
+    metadata:
+      value: "70"
+

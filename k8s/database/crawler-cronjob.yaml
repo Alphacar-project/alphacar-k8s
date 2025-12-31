@@ -1,0 +1,164 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: danawa-crawler-producer
+  namespace: apc-striming-ns
+  labels:
+    app: crawler
+    component: producer
+spec:
+  # 매주 일요일 새벽 2시에 실행 (일주일에 한 번)
+  schedule: "0 2 * * 0"
+  # 동시 실행 방지
+  concurrencyPolicy: Forbid
+  # 실패한 Job 보관 기간
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: crawler
+            component: producer
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: a-worker1
+          containers:
+          - name: crawler-producer
+            image: node:20-slim
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "크롤링 Producer 작업 시작..."
+              cd /app/scripts
+              npm init -y
+              npm install kafkajs mongoose --quiet
+              echo "환경 변수 확인:"
+              echo "KAFKA_BROKERS: $KAFKA_BROKERS"
+              echo "MONGODB_URI: $MONGODB_URI"
+              echo "Producer 스크립트 실행 중..."
+              node /app/scripts/crawl-danawa-v4-producer.js
+            env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: crawler-config
+                  key: kafka_brokers
+            - name: MONGODB_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: crawler-config
+                  key: mongodb_uri
+            - name: NODE_ENV
+              value: "production"
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+            volumeMounts:
+            - name: crawler-scripts
+              mountPath: /app/scripts
+              readOnly: true
+            - name: csv-data
+              mountPath: /app/data
+              readOnly: true
+          volumes:
+          - name: crawler-scripts
+            hostPath:
+              path: /home/alphacar/dbbackup/a/core
+              type: Directory
+          - name: csv-data
+            hostPath:
+              path: /home/alphacar/dbbackup/a/core
+              type: Directory
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: danawa-crawler-consumer
+  namespace: apc-striming-ns
+  labels:
+    app: crawler
+    component: consumer
+spec:
+  # 매주 일요일 새벽 3시에 실행 (Producer 이후, 일주일에 한 번)
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: crawler
+            component: consumer
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: a-worker1
+          containers:
+          - name: crawler-consumer
+            image: node:20-slim
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "크롤링 Consumer 작업 시작..."
+              cd /app/scripts
+              npm init -y
+              npm install kafkajs mongoose puppeteer --quiet
+              echo "환경 변수 확인:"
+              echo "KAFKA_BROKERS: $KAFKA_BROKERS"
+              echo "MONGODB_URI: $MONGODB_URI"
+              echo "Consumer 스크립트 실행 중..."
+              node /app/scripts/crawl-danawa-v4-consumer.js
+            env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: crawler-config
+                  key: kafka_brokers
+            - name: MONGODB_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: crawler-config
+                  key: mongodb_uri
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+            volumeMounts:
+            - name: crawler-scripts
+              mountPath: /app/scripts
+              readOnly: true
+            - name: models
+              mountPath: /app/models
+              readOnly: true
+          volumes:
+          - name: crawler-scripts
+            hostPath:
+              path: /home/alphacar/dbbackup/a/core
+              type: Directory
+          - name: models
+            hostPath:
+              path: /home/alphacar/dbbackup/a/models
+              type: Directory
+

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-analysis-config
+  namespace: apc-obsv-ns
+data:
+  # Prometheus 설정 (내부 Kubernetes 서비스)
+  PROMETHEUS_URL: "http://prometheus.apc-obsv-ns.svc.cluster.local:9090"
+  
+  # Backend 설정
+  BACKEND_PORT: "5000"
+  FRONTEND_PORT: "3000"
+  
+  # 분석 설정
+  ANALYSIS_CACHE_TTL: "300"  # 5분
+  MAX_ANALYSIS_TOKENS: "4000"
+  
+  # 리포트 설정
+  REPORT_SCHEDULE_DAILY: "0 9 * * *"  # 매일 오전 9시
+  REPORT_SCHEDULE_WEEKLY: "0 9 * * 1"  # 매주 월요일 오전 9시
+  
+  # 알림 설정
+  ALERT_CRITICAL_KEYWORDS: "장애,위험,에러,실패,다운"
+  ALERT_WARNING_KEYWORDS: "주의,경고,느림,지연"
+  
+  # k6 설정
+  K6_IMAGE: "grafana/k6:latest"
+  
+  # 실시간 스트리밍 설정
+  WEBSOCKET_ENABLED: "true"
+  STREAM_INTERVAL: "5"  # 5초마다 업데이트
+

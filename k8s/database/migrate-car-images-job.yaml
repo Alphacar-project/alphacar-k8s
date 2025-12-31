@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: car-image-migration
+  namespace: apc-backup-ns
+  labels:
+    app: car-image-migration
+spec:
+  template:
+    metadata:
+      labels:
+        app: car-image-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: migration
+        image: python:3.12-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "=== 차량 이미지 S3 마이그레이션 ==="
+          
+          # AWS 자격증명 파일 생성 (Secret에서 가져오기)
+          if [ -f /tmp/aws-secret/cloud ]; then
+              cp /tmp/aws-secret/cloud /tmp/aws-credentials
+              chmod 600 /tmp/aws-credentials
+              export AWS_SHARED_CREDENTIALS_FILE=/tmp/aws-credentials
+              echo "✅ AWS 자격증명 파일 생성 완료 (Secret 사용)"
+          else
+              echo "❌ AWS 자격증명 Secret을 찾을 수 없습니다."
+              exit 1
+          fi
+          
+          # 패키지 설치
+          pip install --quiet pymongo requests boto3
+          
+          # 환경 변수 확인
+          echo "MongoDB URI: ${MONGODB_URI%%@*}"
+          echo "S3 Bucket: $S3_BUCKET"
+          echo "S3 Prefix: $S3_PREFIX"
+          
+          # Python 스크립트 실행 (ConfigMap에서 마운트)
+          python3 /scripts/migrate.py
+        env:
+        - name: MONGODB_URI
+          value: "mongodb://triple_user:triple_password@mongodb.apc-db-ns.svc.cluster.local:27017/triple_db?authSource=admin&replicaSet=rs0"
+        - name: MONGODB_DB
+          value: "triple_db"
+        - name: S3_BUCKET
+          value: "carimage-382045063773"
+        - name: S3_PREFIX
+          value: "images"
+        - name: AWS_DEFAULT_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: velero-aws-config
+              key: S3_REGION
+        volumeMounts:
+        - name: aws-secret
+          mountPath: /tmp/aws-secret
+          readOnly: true
+        - name: migration-script
+          mountPath: /scripts
+          readOnly: true
+      volumes:
+      - name: aws-secret
+        secret:
+          secretName: cloud-credentials
+          defaultMode: 0400
+      - name: migration-script
+        configMap:
+          name: car-image-migration-script
+          defaultMode: 0755

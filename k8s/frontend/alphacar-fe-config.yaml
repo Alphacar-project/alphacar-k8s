@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alphacar-fe-config
+  namespace: apc-fe-ns
+data:
+  # 백엔드 API 엔드포인트 (Istio Gateway 주소 또는 내부 서비스 주소)
+  NEXT_PUBLIC_API_BASE_URL: "http://alphacar-main-be.alphacar-be-ns.svc.cluster.local:3002"
+  NEXT_PUBLIC_AICHAT_URL: "http://alphacar-aichat-be.alphacar-be-ns.svc.cluster.local:3008"

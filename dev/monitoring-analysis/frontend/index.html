@@ -1,0 +1,2731 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes GenAI 모니터링 대시보드</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans KR', sans-serif;
+            background: #1f1f23;
+            min-height: 100vh;
+            color: #d8d9da;
+        }
+        
+        /* 작은 플로팅 네비게이션 */
+        .sidebar-nav {
+            position: fixed;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 50px;
+            background: #2b2b2f;
+            border: 1px solid #3d3d42;
+            border-radius: 8px;
+            z-index: 90;
+            padding: 8px 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .nav-item {
+            padding: 10px;
+            color: #9e9e9e;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.2s;
+            border-radius: 4px;
+            text-align: center;
+            margin-bottom: 4px;
+            position: relative;
+        }
+        .nav-item:hover {
+            background: #3d3d42;
+            color: #d8d9da;
+        }
+        .nav-item:hover::after {
+            content: attr(data-label);
+            position: absolute;
+            left: 60px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #2b2b2f;
+            color: #d8d9da;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            border: 1px solid #3d3d42;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+        }
+        .nav-item.active {
+            background: #3274d9;
+            color: #fff;
+        }
+        
+        /* 헤더 */
+        .header {
+            background: #2b2b2f;
+            border-bottom: 1px solid #3d3d42;
+            padding: 20px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #d8d9da;
+        }
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .node-selector select {
+            padding: 6px 12px;
+            background: #1f1f23;
+            border: 1px solid #3d3d42;
+            border-radius: 2px;
+            color: #d8d9da;
+            font-size: 13px;
+        }
+        
+        /* 메인 컨텐츠 */
+        .main-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        
+        /* 섹션 스타일 */
+        .section {
+            margin-bottom: 48px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+        .section.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .section-title {
+            font-size: 28px;
+            font-weight: 600;
+            color: #d8d9da;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #3274d9;
+        }
+        
+        /* 카드 스타일 */
+        .card {
+            background: #2b2b2f;
+            border-radius: 4px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            border: 1px solid #3d3d42;
+            margin-bottom: 24px;
+        }
+        .card h3 {
+            font-size: 18px;
+            font-weight: 500;
+            color: #d8d9da;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #3d3d42;
+            padding-bottom: 8px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        /* 반응형 디자인 */
+        @media (min-width: 1400px) {
+            .grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+            .main-content {
+                max-width: 1600px;
+            }
+        }
+        @media (min-width: 1024px) and (max-width: 1399px) {
+            .grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        @media (min-width: 768px) and (max-width: 1023px) {
+            .grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .main-content {
+                padding: 16px;
+            }
+        }
+        @media (max-width: 767px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            .main-content {
+                padding: 12px;
+            }
+            .section-title {
+                font-size: 22px;
+            }
+            .sidebar-nav {
+                left: 10px;
+                width: 40px;
+            }
+            .header {
+                padding: 16px;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .header h1 {
+                font-size: 20px;
+            }
+            .header-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+        }
+        
+        /* 버튼 스타일 */
+        .btn {
+            background: #3274d9;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: #4080e8;
+        }
+        .btn-secondary {
+            background: #464650;
+        }
+        .btn-secondary:hover {
+            background: #52525c;
+        }
+        
+        /* 입력 필드 */
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            margin: 8px 0;
+            border: 1px solid #3d3d42;
+            border-radius: 4px;
+            font-size: 14px;
+            background: #1f1f23;
+            color: #d8d9da;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #3274d9;
+            box-shadow: 0 0 0 2px rgba(50, 116, 217, 0.2);
+        }
+        
+        /* 차트 컨테이너 */
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 16px;
+            background: #1f1f23;
+            border-radius: 4px;
+            padding: 16px;
+        }
+        
+        /* 상태 표시 */
+        .status {
+            padding: 12px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            border-left: 4px solid;
+            margin-top: 16px;
+        }
+        .status.success {
+            background: rgba(46, 160, 67, 0.15);
+            color: #73bf69;
+            border-left-color: #73bf69;
+        }
+        .status.error {
+            background: rgba(211, 47, 47, 0.15);
+            color: #e57373;
+            border-left-color: #e57373;
+        }
+        .status.warning {
+            background: rgba(237, 212, 0, 0.15);
+            color: #fdd835;
+            border-left-color: #fdd835;
+        }
+        
+        /* 테이블 스타일 */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 16px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background: #1f1f23;
+            color: #9e9e9e;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            border-bottom: 1px solid #3d3d42;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #3d3d42;
+            color: #d8d9da;
+        }
+        tr:hover {
+            background: #3d3d42;
+        }
+        
+        /* 로딩 애니메이션 */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(50, 116, 217, 0.2);
+            border-top: 2px solid #3274d9;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden { display: none; }
+        
+        /* 메트릭 카드 */
+        .metric-card {
+            background: #2b2b2f;
+            border: 1px solid #3d3d42;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            min-height: 160px;
+            display: flex;
+            flex-direction: column;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border-color: #3274d9;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #3274d9;
+            margin: 8px 0;
+            line-height: 1.2;
+        }
+        .metric-label {
+            font-size: 14px;
+            color: #9e9e9e;
+            text-transform: uppercase;
+        }
+        
+        /* 분석 결과 */
+        .analysis-result {
+            background: #2b2b2f;
+            border: 1px solid #3d3d42;
+            border-radius: 4px;
+            padding: 20px;
+            margin-top: 16px;
+        }
+        .analysis-text {
+            background: #1f1f23;
+            padding: 16px;
+            border-radius: 4px;
+            line-height: 1.8;
+            white-space: pre-line;
+            font-size: 14px;
+            color: #d8d9da;
+            border-left: 3px solid #3274d9;
+        }
+        
+        /* 리소스 그리드 */
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 24px;
+        }
+        
+        /* 검색 가능한 셀렉트 박스 */
+        .searchable-select {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .searchable-select input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #3d3d42;
+            border-radius: 4px;
+            background: #1f1f23;
+            color: #d8d9da;
+            font-size: 14px;
+        }
+        .searchable-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #2b2b2f;
+            border: 1px solid #3d3d42;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            margin-top: 4px;
+        }
+        .searchable-select-dropdown.show {
+            display: block;
+        }
+        .searchable-select-option {
+            padding: 10px 12px;
+            cursor: pointer;
+            color: #d8d9da;
+            border-bottom: 1px solid #3d3d42;
+        }
+        .searchable-select-option:hover {
+            background: #3d3d42;
+        }
+        .searchable-select-option.selected {
+            background: #3274d9;
+            color: white;
+        }
+        .selected-pod-badge {
+            display: inline-block;
+            background: #3274d9;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- 작은 플로팅 네비게이션 -->
+    <div class="sidebar-nav">
+        <div class="nav-item active" data-label="클러스터 개요" onclick="scrollToSection('section-cluster-overview')">📊</div>
+        <div class="nav-item" data-label="조기 경고" onclick="scrollToSection('section-early-warning')">🚨</div>
+        <div class="nav-item" data-label="성능 메트릭" onclick="scrollToSection('section-performance-metrics')">⚡</div>
+        <div class="nav-item" data-label="시스템 부하" onclick="scrollToSection('section-system-load')">🎯</div>
+        <div class="nav-item" data-label="가용성 및 예산" onclick="scrollToSection('section-availability-budget')">❤️</div>
+        <div class="nav-item" data-label="리소스 사용률" onclick="scrollToSection('section-resources')">💻</div>
+        <div class="nav-item" data-label="파드 분석" onclick="scrollToSection('section-pod-analysis')">🔍</div>
+        <div class="nav-item" data-label="Pod 상태 모니터링" onclick="scrollToSection('section-pod-status')">📈</div>
+        <div class="nav-item" data-label="노드 상태 모니터링" onclick="scrollToSection('section-node-status')">🖥️</div>
+        <div class="nav-item" data-label="AI 분석" onclick="scrollToSection('section-ai-analysis')">🤖</div>
+    </div>
+    
+    <!-- 헤더 -->
+    <div class="header">
+        <h1>☸️ Kubernetes GenAI 모니터링 대시보드</h1>
+        <div class="header-actions">
+            <select id="nodeSelector">
+                <option value="all">모든 노드</option>
+            </select>
+            <span style="font-size: 12px; color: #9e9e9e; margin-right: 8px;">30초마다 자동 새로고침</span>
+            <button class="btn btn-secondary" onclick="refreshAll()">🔄 전체 새로고침</button>
+        </div>
+    </div>
+    
+    <!-- 메인 컨텐츠 -->
+    <div class="main-content">
+        <!-- 클러스터 개요 섹션 -->
+        <section id="section-cluster-overview" class="section">
+            <h2 class="section-title">클러스터 개요</h2>
+            <div class="card">
+                <h3>클러스터 상태</h3>
+                <button class="btn" onclick="checkK8sStatus()">상태 분석</button>
+                <div id="clusterStatus"></div>
+            </div>
+            <div class="grid">
+                <div class="metric-card">
+                    <div class="metric-label">전체 노드</div>
+                    <div class="metric-value" id="totalNodes">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">전체 Pod</div>
+                    <div class="metric-value" id="totalPods">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Running Pod</div>
+                    <div class="metric-value" id="runningPods">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">건강 점수</div>
+                    <div class="metric-value" id="healthScore">-</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 조기 경고 섹션 -->
+        <section id="section-early-warning" class="section">
+            <h2 class="section-title">조기 경고 (Catch It Early)</h2>
+            <div id="earlyWarningSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                <!-- 요약 카드는 동적으로 생성 -->
+            </div>
+            <div id="earlyWarningAlerts" class="card">
+                <h3 style="margin-bottom: 16px;">실시간 알림</h3>
+                <div id="earlyWarningList" style="display: flex; flex-direction: column; gap: 12px;">
+                    <div style="text-align: center; padding: 40px; color: #9e9e9e;">
+                        <div class="loading"></div> 로딩 중...
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 성능 메트릭 섹션 -->
+        <section id="section-performance-metrics" class="section">
+            <h2 class="section-title">성능 메트릭</h2>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+                <!-- Latency -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">⏱️</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Latency</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">요청 처리 지연 시간</div>
+                    <div class="metric-value" id="latencyValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="latencyTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Error rate -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">🩸</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Error rate</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">에러 발생 비율</div>
+                    <div class="metric-value" id="errorRateValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="errorRateTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Throughput -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">📊</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Throughput</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">초당 처리 요청 수</div>
+                    <div class="metric-value" id="throughputValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="throughputTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Reqs/sec -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">⚡</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Reqs/sec</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">초당 요청 수</div>
+                    <div class="metric-value" id="rpsValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="rpsTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 시스템 부하 메트릭 섹션 -->
+        <section id="section-system-load" class="section">
+            <h2 class="section-title">시스템 부하</h2>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+                <!-- Saturation -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">🎯</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Saturation</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">CPU/Memory 포화도</div>
+                    <div class="metric-value" id="saturationValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="saturationTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Queue depth -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">📋</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Queue depth</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">Pod 스케줄링 대기 큐</div>
+                    <div class="metric-value" id="queueDepthValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="queueDepthTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Load -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">⚖️</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Load</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">노드별 로드 평균</div>
+                    <div class="metric-value" id="loadValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="loadTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 가용성 및 예산 메트릭 섹션 -->
+        <section id="section-availability-budget" class="section">
+            <h2 class="section-title">가용성 및 예산</h2>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+                <!-- Availability -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">❤️</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Availability</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">서비스 가용성</div>
+                    <div class="metric-value" id="availabilityValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="availabilityTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+                
+                <!-- Error budget -->
+                <div class="metric-card" style="padding: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 24px;">💰</span>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600;">Error budget</h3>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #9e9e9e; margin-bottom: 8px;">SLO 기반 에러 예산</div>
+                    <div class="metric-value" id="errorBudgetValue" style="font-size: 28px; margin-bottom: 8px; color: #3274d9;">-</div>
+                    <div id="errorBudgetMinutes" style="font-size: 12px; color: #9e9e9e; margin-bottom: 4px;">-</div>
+                    <div style="font-size: 11px; color: #9e9e9e; margin-bottom: 4px;">변화 추세</div>
+                    <div id="errorBudgetTrend" style="font-size: 12px; color: #9e9e9e;">-</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 리소스 사용률 섹션 -->
+        <section id="section-resources" class="section">
+            <h2 class="section-title">리소스 사용률</h2>
+            <div class="card" style="margin-bottom: 24px;">
+                <h3>Pod 선택</h3>
+                <div class="searchable-select">
+                    <input type="text" id="podSearchInput" placeholder="Pod 검색 (전체 보려면 비워두세요)" oninput="filterPods(this.value)" onfocus="showPodDropdown()">
+                    <div id="podDropdown" class="searchable-select-dropdown"></div>
+                </div>
+                <div id="selectedPodInfo"></div>
+            </div>
+            <div class="resource-grid">
+                <!-- Container CPU -->
+                <div class="card">
+                    <h3>Container CPU 사용률</h3>
+                    <div class="chart-container">
+                        <canvas id="containerCpuChart"></canvas>
+                    </div>
+                    <div class="table-container">
+                        <table id="containerCpuTable">
+                            <thead>
+                                <tr>
+                                    <th>네임스페이스</th>
+                                    <th>Pod</th>
+                                    <th>Container</th>
+                                    <th>CPU 사용률</th>
+                                    <th>CPU Limit</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Container Memory -->
+                <div class="card">
+                    <h3>Container Memory 사용률</h3>
+                    <div class="chart-container">
+                        <canvas id="containerMemoryChart"></canvas>
+                    </div>
+                    <div class="table-container">
+                        <table id="containerMemoryTable">
+                            <thead>
+                                <tr>
+                                    <th>네임스페이스</th>
+                                    <th>Pod</th>
+                                    <th>Container</th>
+                                    <th>Memory 사용량</th>
+                                    <th>Memory Limit</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Pod CPU -->
+                <div class="card">
+                    <h3>Pod CPU 사용률</h3>
+                    <div class="chart-container">
+                        <canvas id="podCpuChart"></canvas>
+                    </div>
+                    <div class="table-container">
+                        <table id="podCpuTable">
+                            <thead>
+                                <tr>
+                                    <th>네임스페이스</th>
+                                    <th>Pod</th>
+                                    <th>CPU 사용률</th>
+                                    <th>CPU Request</th>
+                                    <th>CPU Limit</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Pod Memory -->
+                <div class="card">
+                    <h3>Pod Memory 사용률</h3>
+                    <div class="chart-container">
+                        <canvas id="podMemoryChart"></canvas>
+                    </div>
+                    <div class="table-container">
+                        <table id="podMemoryTable">
+                            <thead>
+                                <tr>
+                                    <th>네임스페이스</th>
+                                    <th>Pod</th>
+                                    <th>Memory 사용량</th>
+                                    <th>Memory Request</th>
+                                    <th>Memory Limit</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- 파드 분석 섹션 -->
+        <section id="section-pod-analysis" class="section">
+            <h2 class="section-title">파드 분석</h2>
+            <div class="card">
+                <h3>Pod 상세 분석</h3>
+                <p style="margin-bottom: 16px; color: #9e9e9e;">Pod 이름과 네임스페이스를 입력하면 AI가 kubectl describe와 logs를 분석하여 문제점과 해결책을 제시합니다.</p>
+                <input type="text" id="podAnalysisName" placeholder="Pod 이름 (필수)" required>
+                <input type="text" id="podAnalysisNamespace" placeholder="네임스페이스 (기본값: default)" value="default">
+                <button class="btn" onclick="analyzePod()">🔍 Pod 분석 시작</button>
+                <div id="podAnalysisStatus"></div>
+                <div id="podAnalysisResult" class="hidden"></div>
+            </div>
+        </section>
+        
+        <!-- Pod 상태 모니터링 섹션 -->
+        <section id="section-pod-status" class="section">
+            <h2 class="section-title">Pod 상태 모니터링</h2>
+            <div class="card">
+                <h3>Pod 상태 요약</h3>
+                <div id="podStatusSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;"></div>
+                <button class="btn" onclick="loadPodStatus()">상태 새로고침</button>
+                <div id="podStatusDetails" style="margin-top: 16px;"></div>
+            </div>
+        </section>
+        
+        <!-- 노드 상태 모니터링 섹션 -->
+        <section id="section-node-status" class="section">
+            <h2 class="section-title">노드 상태 모니터링</h2>
+            <div class="card">
+                <h3>노드 상태 요약</h3>
+                <div id="nodeStatusSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;"></div>
+                <button class="btn" onclick="loadNodeStatus()">상태 새로고침</button>
+                <div id="nodeStatusDetails" style="margin-top: 16px;"></div>
+            </div>
+        </section>
+        
+        <!-- AI 분석 섹션 -->
+        <section id="section-ai-analysis" class="section">
+            <h2 class="section-title">AI 분석</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>📈 K8s 메트릭 분석</h3>
+                    <select id="k8sMetricsQuery">
+                        <option value="up">클러스터 가용성 (up)</option>
+                        <option value="kube_pod_status_phase">Pod 상태 분포</option>
+                        <option value="kube_node_status_condition">노드 상태</option>
+                        <option value="container_cpu_usage_seconds_total">CPU 사용률</option>
+                        <option value="container_memory_working_set_bytes">메모리 사용량</option>
+                    </select>
+                    <input type="text" id="metricsQuery" placeholder="또는 직접 PromQL 입력">
+                    <button class="btn" onclick="analyzeMetrics()">분석 시작</button>
+                    <div id="metricsStatus"></div>
+                    <div id="metricsAnalysis" class="hidden"></div>
+                    <div id="metricsChart" class="chart-container hidden"></div>
+                </div>
+                <div class="card">
+                    <h3>📝 K8s Pod 로그 분석</h3>
+                    <input type="text" id="podName" placeholder="Pod 이름 (선택사항)">
+                    <input type="text" id="namespace" placeholder="네임스페이스 (선택사항)">
+                    <select id="logLevel">
+                        <option value="error">Error</option>
+                        <option value="warning">Warning</option>
+                        <option value="info">Info</option>
+                    </select>
+                    <input type="number" id="logHours" placeholder="시간 범위 (시간)" value="1" min="1" max="24">
+                    <button class="btn" onclick="analyzeLogs()">분석 시작</button>
+                    <div id="logsStatus"></div>
+                    <div id="logsAnalysis" class="hidden"></div>
+                </div>
+                <div class="card">
+                    <h3>🔍 트레이스 분석</h3>
+                    <input type="text" id="traceService" placeholder="서비스 이름 (선택사항)">
+                    <button class="btn" onclick="analyzeTraces()">분석 시작</button>
+                    <div id="tracesStatus"></div>
+                    <div id="tracesAnalysis" class="hidden"></div>
+                    <div id="tracesChart" class="chart-container hidden"></div>
+                </div>
+            </div>
+        </section>
+        
+    </div>
+    
+    <script>
+        const API_BASE = '/api';
+        let charts = {};
+        let loadedSections = new Set();
+        let allPods = [];
+        let selectedPod = null;
+        let selectedNamespace = null;
+        let podListCache = null;
+        
+        // HTML 이스케이프 함수
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function safeHtml(text) {
+            if (!text) return '';
+            return escapeHtml(text).replace(/\n/g, '<br>');
+        }
+        
+        // 스크롤 감지 및 섹션 표시
+        function handleScroll() {
+            const sections = document.querySelectorAll('.section');
+            const windowHeight = window.innerHeight;
+            const headerHeight = 80;
+            
+            let activeSection = null;
+            
+            sections.forEach(section => {
+                const rect = section.getBoundingClientRect();
+                const isVisible = rect.top < windowHeight * 0.8 && rect.bottom > 0;
+                
+                if (isVisible && !section.classList.contains('visible')) {
+                    section.classList.add('visible');
+                    const sectionId = section.id;
+                    
+                    // 섹션별 데이터 로드
+                    if (!loadedSections.has(sectionId)) {
+                        loadSectionData(sectionId);
+                        loadedSections.add(sectionId);
+                    }
+                }
+                
+                // 현재 보이는 섹션 찾기
+                if (rect.top <= headerHeight + 100 && rect.bottom > headerHeight + 100) {
+                    activeSection = section.id;
+                }
+            });
+            
+            // 네비게이션 활성화 업데이트
+            if (activeSection) {
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    item.classList.remove('active');
+                    if (item.getAttribute('onclick')?.includes(activeSection)) {
+                        item.classList.add('active');
+                    }
+                });
+            }
+        }
+        
+        // 섹션별 데이터 로드
+        function loadSectionData(sectionId) {
+            switch(sectionId) {
+                case 'section-cluster-overview':
+                    loadClusterOverview();
+                    loadClusterStats();
+                    break;
+                case 'section-performance-metrics':
+                    loadPerformanceMetrics();
+                    break;
+                case 'section-system-load':
+                    loadSystemLoadMetrics();
+                    break;
+                case 'section-availability-budget':
+                    loadAvailabilityBudgetMetrics();
+                    break;
+                case 'section-early-warning':
+                    loadEarlyWarning();
+                    break;
+                case 'section-resources':
+                    loadPodList();
+                    // 처음에는 Pod 선택 없이 빈 상태로 시작
+                    // Pod 선택 시에만 데이터 로드
+                    break;
+                case 'section-pod-analysis':
+                    // 사용자가 수동으로 분석 시작
+                    break;
+                case 'section-pod-status':
+                    loadPodStatus();
+                    break;
+                case 'section-node-status':
+                    loadNodeStatus();
+                    break;
+                case 'section-ai-analysis':
+                    // 사용자가 수동으로 분석 시작
+                    break;
+            }
+        }
+        
+        // 전체 새로고침
+        function refreshAll() {
+            loadedSections.clear();
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('visible');
+            });
+            handleScroll();
+        }
+        
+        // 클러스터 개요 로드
+        async function loadClusterOverview() {
+            try {
+                // 건강 점수만 로드 (상태 분석은 버튼 클릭 시에만 실행)
+                const res = await fetch(`${API_BASE}/k8s/status`);
+                const data = await res.json();
+                
+                document.getElementById('healthScore').textContent = data.healthScore || '-';
+                
+                // clusterStatus는 초기에는 비워둠 (상태 분석 버튼 클릭 시에만 표시)
+                const statusDiv = document.getElementById('clusterStatus');
+                statusDiv.innerHTML = '';
+            } catch (e) {
+                console.error('Cluster overview error:', e);
+                document.getElementById('healthScore').textContent = '-';
+            }
+        }
+        
+        // 클러스터 통계 로드
+        async function loadClusterStats() {
+            try {
+                // 노드 수
+                const nodeRes = await fetch(`${API_BASE}/k8s/nodes`);
+                const nodeData = await nodeRes.json();
+                document.getElementById('totalNodes').textContent = nodeData.nodes?.length || 0;
+                
+                // Pod 수
+                const podRes = await fetch(`${API_BASE}/k8s/pods`);
+                const podData = await podRes.json();
+                const pods = podData.pods || [];
+                const totalPods = pods.length;
+                const runningPods = pods.filter(p => p.status === 'Running').length;
+                
+                document.getElementById('totalPods').textContent = totalPods;
+                document.getElementById('runningPods').textContent = runningPods;
+                
+                // Pod 목록 캐시
+                podListCache = pods;
+            } catch (e) {
+                console.error('Cluster stats error:', e);
+                document.getElementById('totalPods').textContent = '-';
+                document.getElementById('runningPods').textContent = '-';
+            }
+        }
+        
+        // Pod 목록 로드
+        async function loadPodList() {
+            try {
+                if (podListCache) {
+                    allPods = podListCache;
+                } else {
+                    const res = await fetch(`${API_BASE}/k8s/pods`);
+                    const data = await res.json();
+                    allPods = data.pods || [];
+                }
+                updatePodDropdown(allPods);
+            } catch (e) {
+                console.error('Load pod list error:', e);
+                allPods = [];
+            }
+        }
+        
+        // Pod 드롭다운 업데이트
+        function updatePodDropdown(pods) {
+            const dropdown = document.getElementById('podDropdown');
+            dropdown.innerHTML = '';
+            
+            if (pods.length === 0) {
+                dropdown.innerHTML = '<div class="searchable-select-option">Pod가 없습니다</div>';
+                return;
+            }
+            
+                // "선택 안함" 옵션 추가
+                const noneOption = document.createElement('div');
+                noneOption.className = 'searchable-select-option' + (selectedPod === null ? ' selected' : '');
+                noneOption.textContent = 'Pod 선택 안함';
+                noneOption.onclick = () => selectPod(null);
+                dropdown.appendChild(noneOption);
+            
+            pods.forEach(pod => {
+                const option = document.createElement('div');
+                option.className = 'searchable-select-option' + (selectedPod === pod.name ? ' selected' : '');
+                option.textContent = `${pod.namespace}/${pod.name} (${pod.status})`;
+                option.onclick = () => selectPod(pod.name, pod.namespace);
+                dropdown.appendChild(option);
+            });
+        }
+        
+        // Pod 필터링
+        function filterPods(searchTerm) {
+            const filtered = allPods.filter(pod => {
+                const search = searchTerm.toLowerCase();
+                return pod.name.toLowerCase().includes(search) || 
+                       pod.namespace.toLowerCase().includes(search);
+            });
+            updatePodDropdown(filtered);
+            showPodDropdown();
+        }
+        
+        // 드롭다운 표시
+        function showPodDropdown() {
+            document.getElementById('podDropdown').classList.add('show');
+        }
+        
+        // Pod 선택
+        function selectPod(podName, namespace) {
+            selectedPod = podName;
+            selectedNamespace = namespace;
+            document.getElementById('podSearchInput').value = podName ? `${namespace}/${podName}` : '';
+            document.getElementById('podDropdown').classList.remove('show');
+            
+            // 선택된 Pod 정보 표시
+            const infoDiv = document.getElementById('selectedPodInfo');
+            if (podName) {
+                const pod = allPods.find(p => p.name === podName && p.namespace === namespace);
+                infoDiv.innerHTML = `<span class="selected-pod-badge">선택됨: ${namespace}/${podName} (${pod?.status || 'Unknown'})</span>`;
+            } else {
+                infoDiv.innerHTML = '<span class="selected-pod-badge" style="background: #9e9e9e;">Pod를 선택해주세요</span>';
+            }
+            
+            // 리소스 데이터 다시 로드
+            loadContainerCpu();
+            loadContainerMemory();
+            loadPodCpu();
+            loadPodMemory();
+        }
+        
+        // 클릭 외부 감지
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.searchable-select')) {
+                document.getElementById('podDropdown').classList.remove('show');
+            }
+        });
+        
+        // Container CPU 로드 (과거 데이터 포함)
+        async function loadContainerCpu() {
+            // Pod가 선택되지 않았으면 데이터 표시 안함
+            if (!selectedPod || !selectedNamespace) {
+                updateChart('containerCpuChart', { labels: [], values: [] }, 'Container CPU 사용률 (%)');
+                const tbody = document.querySelector('#containerCpuTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">Pod를 선택해주세요</td></tr>';
+                return;
+            }
+            
+            try {
+                // 현재 데이터
+                const res = await fetch(`${API_BASE}/k8s/resources/container/cpu`);
+                const data = await res.json();
+                
+                // 과거 데이터 (시계열)
+                const historyRes = await fetch(`${API_BASE}/k8s/resources/container/cpu/history?pod=${selectedPod}&namespace=${selectedNamespace}&hours=24`);
+                let historyData = null;
+                if (historyRes.ok) {
+                    historyData = await historyRes.json();
+                }
+                
+                // Pod 필터링
+                let containers = data.containers || [];
+                containers = containers.filter(c => c.pod === selectedPod && c.namespace === selectedNamespace);
+                
+                // 시계열 차트 데이터 생성
+                if (historyData && historyData.timeline && historyData.timeline.length > 0) {
+                    const timeline = historyData.timeline;
+                    const chartData = {
+                        labels: timeline.map(t => {
+                            const date = new Date(t.timestamp);
+                            return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+                        }),
+                        values: timeline.map(t => t.cpuUsage || 0)
+                    };
+                    updateTimeSeriesChart('containerCpuChart', chartData, `Container CPU 사용률 - ${selectedPod} (%)`);
+                } else if (containers.length > 0) {
+                    // 과거 데이터가 없으면 현재 데이터만 표시
+                    const chartData = {
+                        labels: data.chartData?.labels || [],
+                        values: containers.map(c => c.cpuUsage || 0)
+                    };
+                    updateChart('containerCpuChart', chartData, `Container CPU 사용률 - ${selectedPod} (%)`);
+                } else {
+                    updateChart('containerCpuChart', { labels: [], values: [] }, 'Container CPU 사용률 (%)');
+                }
+                
+                // 테이블 업데이트
+                const tbody = document.querySelector('#containerCpuTable tbody');
+                if (containers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">데이터가 없습니다</td></tr>';
+                } else {
+                    tbody.innerHTML = containers.map(c => `
+                        <tr>
+                            <td>${escapeHtml(c.namespace || '')}</td>
+                            <td>${escapeHtml(c.pod || '')}</td>
+                            <td>${escapeHtml(c.container || '')}</td>
+                            <td>${(c.cpuUsage || 0).toFixed(2)}%</td>
+                            <td>${c.cpuLimit || 'N/A'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Container CPU error:', e);
+            }
+        }
+        
+        // Container Memory 로드 (과거 데이터 포함)
+        async function loadContainerMemory() {
+            if (!selectedPod || !selectedNamespace) {
+                updateChart('containerMemoryChart', { labels: [], values: [] }, 'Container Memory 사용량 (Mi)');
+                const tbody = document.querySelector('#containerMemoryTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">Pod를 선택해주세요</td></tr>';
+                return;
+            }
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/resources/container/memory`);
+                const data = await res.json();
+                
+                // 과거 데이터
+                const historyRes = await fetch(`${API_BASE}/k8s/resources/container/memory/history?pod=${selectedPod}&namespace=${selectedNamespace}&hours=24`);
+                let historyData = null;
+                if (historyRes.ok) {
+                    historyData = await historyRes.json();
+                }
+                
+                let containers = data.containers || [];
+                containers = containers.filter(c => c.pod === selectedPod && c.namespace === selectedNamespace);
+                
+                if (historyData && historyData.timeline && historyData.timeline.length > 0) {
+                    const timeline = historyData.timeline;
+                    const chartData = {
+                        labels: timeline.map(t => {
+                            const date = new Date(t.timestamp);
+                            return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+                        }),
+                        values: timeline.map(t => t.memoryUsage || 0)
+                    };
+                    updateTimeSeriesChart('containerMemoryChart', chartData, `Container Memory 사용량 - ${selectedPod} (Mi)`);
+                } else if (containers.length > 0) {
+                    const chartData = {
+                        labels: data.chartData?.labels || [],
+                        values: containers.map(c => c.memoryUsage || 0)
+                    };
+                    updateChart('containerMemoryChart', chartData, `Container Memory 사용량 - ${selectedPod} (Mi)`);
+                } else {
+                    updateChart('containerMemoryChart', { labels: [], values: [] }, 'Container Memory 사용량 (Mi)');
+                }
+                
+                const tbody = document.querySelector('#containerMemoryTable tbody');
+                if (containers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">데이터가 없습니다</td></tr>';
+                } else {
+                    tbody.innerHTML = containers.map(c => `
+                        <tr>
+                            <td>${escapeHtml(c.namespace || '')}</td>
+                            <td>${escapeHtml(c.pod || '')}</td>
+                            <td>${escapeHtml(c.container || '')}</td>
+                            <td>${(c.memoryUsage || 0).toFixed(2)} Mi</td>
+                            <td>${c.memoryLimit || 'N/A'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Container Memory error:', e);
+            }
+        }
+        
+        // Pod CPU 로드 (과거 데이터 포함)
+        async function loadPodCpu() {
+            if (!selectedPod || !selectedNamespace) {
+                updateChart('podCpuChart', { labels: [], values: [] }, 'Pod CPU 사용률 (%)');
+                const tbody = document.querySelector('#podCpuTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">Pod를 선택해주세요</td></tr>';
+                return;
+            }
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/resources/pod/cpu`);
+                const data = await res.json();
+                
+                const historyRes = await fetch(`${API_BASE}/k8s/resources/pod/cpu/history?pod=${selectedPod}&namespace=${selectedNamespace}&hours=24`);
+                let historyData = null;
+                if (historyRes.ok) {
+                    historyData = await historyRes.json();
+                }
+                
+                let pods = data.pods || [];
+                pods = pods.filter(p => p.pod === selectedPod && p.namespace === selectedNamespace);
+                
+                if (historyData && historyData.timeline && historyData.timeline.length > 0) {
+                    const timeline = historyData.timeline;
+                    const chartData = {
+                        labels: timeline.map(t => {
+                            const date = new Date(t.timestamp);
+                            return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+                        }),
+                        values: timeline.map(t => t.cpuUsage || 0)
+                    };
+                    updateTimeSeriesChart('podCpuChart', chartData, `Pod CPU 사용률 - ${selectedPod} (%)`);
+                } else if (pods.length > 0) {
+                    const chartData = {
+                        labels: data.chartData?.labels || [],
+                        values: pods.map(p => p.cpuUsage || 0)
+                    };
+                    updateChart('podCpuChart', chartData, `Pod CPU 사용률 - ${selectedPod} (%)`);
+                } else {
+                    updateChart('podCpuChart', { labels: [], values: [] }, 'Pod CPU 사용률 (%)');
+                }
+                
+                const tbody = document.querySelector('#podCpuTable tbody');
+                if (pods.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">데이터가 없습니다</td></tr>';
+                } else {
+                    tbody.innerHTML = pods.map(p => `
+                        <tr>
+                            <td>${escapeHtml(p.namespace || '')}</td>
+                            <td>${escapeHtml(p.pod || '')}</td>
+                            <td>${(p.cpuUsage || 0).toFixed(2)}%</td>
+                            <td>${p.cpuRequest || 'N/A'}</td>
+                            <td>${p.cpuLimit || 'N/A'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Pod CPU error:', e);
+            }
+        }
+        
+        // Pod Memory 로드 (과거 데이터 포함)
+        async function loadPodMemory() {
+            if (!selectedPod || !selectedNamespace) {
+                updateChart('podMemoryChart', { labels: [], values: [] }, 'Pod Memory 사용량 (Mi)');
+                const tbody = document.querySelector('#podMemoryTable tbody');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">Pod를 선택해주세요</td></tr>';
+                return;
+            }
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/resources/pod/memory`);
+                const data = await res.json();
+                
+                const historyRes = await fetch(`${API_BASE}/k8s/resources/pod/memory/history?pod=${selectedPod}&namespace=${selectedNamespace}&hours=24`);
+                let historyData = null;
+                if (historyRes.ok) {
+                    historyData = await historyRes.json();
+                }
+                
+                let pods = data.pods || [];
+                pods = pods.filter(p => p.pod === selectedPod && p.namespace === selectedNamespace);
+                
+                if (historyData && historyData.timeline && historyData.timeline.length > 0) {
+                    const timeline = historyData.timeline;
+                    const chartData = {
+                        labels: timeline.map(t => {
+                            const date = new Date(t.timestamp);
+                            return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+                        }),
+                        values: timeline.map(t => t.memoryUsage || 0)
+                    };
+                    updateTimeSeriesChart('podMemoryChart', chartData, `Pod Memory 사용량 - ${selectedPod} (Mi)`);
+                } else if (pods.length > 0) {
+                    const chartData = {
+                        labels: data.chartData?.labels || [],
+                        values: pods.map(p => p.memoryUsage || 0)
+                    };
+                    updateChart('podMemoryChart', chartData, `Pod Memory 사용량 - ${selectedPod} (Mi)`);
+                } else {
+                    updateChart('podMemoryChart', { labels: [], values: [] }, 'Pod Memory 사용량 (Mi)');
+                }
+                
+                const tbody = document.querySelector('#podMemoryTable tbody');
+                if (pods.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #9e9e9e;">데이터가 없습니다</td></tr>';
+                } else {
+                    tbody.innerHTML = pods.map(p => `
+                        <tr>
+                            <td>${escapeHtml(p.namespace || '')}</td>
+                            <td>${escapeHtml(p.pod || '')}</td>
+                            <td>${(p.memoryUsage || 0).toFixed(2)} Mi</td>
+                            <td>${p.memoryRequest || 'N/A'}</td>
+                            <td>${p.memoryLimit || 'N/A'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Pod Memory error:', e);
+            }
+        }
+        
+        // 차트 업데이트
+        function updateChart(canvasId, data, label) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            if (charts[canvasId]) {
+                charts[canvasId].destroy();
+            }
+            
+            charts[canvasId] = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: data?.labels || [],
+                    datasets: [{
+                        label: label,
+                        data: data?.values || [],
+                        borderColor: '#3274d9',
+                        backgroundColor: 'rgba(50, 116, 217, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#d8d9da' } }
+                    },
+                    scales: {
+                        y: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } },
+                        x: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } }
+                    }
+                }
+            });
+        }
+        
+        // 시계열 차트 업데이트 (과거 데이터)
+        function updateTimeSeriesChart(canvasId, data, label) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            if (charts[canvasId]) {
+                charts[canvasId].destroy();
+            }
+            
+            charts[canvasId] = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: data?.labels || [],
+                    datasets: [{
+                        label: label,
+                        data: data?.values || [],
+                        borderColor: '#3274d9',
+                        backgroundColor: 'rgba(50, 116, 217, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#d8d9da' } },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { 
+                            ticks: { color: '#9e9e9e' }, 
+                            grid: { color: '#3d3d42' },
+                            beginAtZero: true
+                        },
+                        x: { 
+                            ticks: { 
+                                color: '#9e9e9e',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }, 
+                            grid: { color: '#3d3d42' } 
+                        }
+                    }
+                }
+            });
+        }
+        
+        // K8s 상태 체크 (상태 분석 버튼 클릭 시 실행)
+        async function checkK8sStatus() {
+            const statusDiv = document.getElementById('clusterStatus');
+            statusDiv.innerHTML = '<div class="loading"></div> 상태 분석 중...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/status`);
+                const data = await res.json();
+                
+                // 건강 점수도 업데이트
+                document.getElementById('healthScore').textContent = data.healthScore || '-';
+                
+                let html = `
+                    <div style="margin-top: 16px;">
+                        <div style="font-size: 24px; font-weight: 600; color: ${data.status === 'healthy' ? '#73bf69' : data.status === 'warning' ? '#fdd835' : '#e57373'};">
+                            건강 점수: ${data.healthScore}/100
+                        </div>
+                        <div style="margin-top: 12px;">
+                            Critical: ${data.criticalCount || 0} | Warning: ${data.warningCount || 0}
+                        </div>
+                `;
+                
+                if (data.aiAnalysis) {
+                    html += `
+                        <div class="analysis-result" style="margin-top: 16px;">
+                            <h3>AI 분석</h3>
+                            <div class="analysis-text">${safeHtml(data.aiAnalysis)}</div>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+                statusDiv.innerHTML = html;
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        // 파드 분석
+        async function analyzePod() {
+            const podName = document.getElementById('podAnalysisName').value.trim();
+            const namespace = document.getElementById('podAnalysisNamespace').value.trim() || 'default';
+            
+            if (!podName) {
+                alert('Pod 이름을 입력해주세요.');
+                return;
+            }
+            
+            const statusDiv = document.getElementById('podAnalysisStatus');
+            const resultDiv = document.getElementById('podAnalysisResult');
+            
+            statusDiv.innerHTML = '<div class="loading"></div> Pod 정보 수집 중... (kubectl describe & logs 실행)';
+            resultDiv.classList.add('hidden');
+            
+            try {
+                const res = await fetch(`${API_BASE}/analyze/pod`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        podName,
+                        namespace
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="status error">에러: ${data.error}</div>`;
+                    return;
+                }
+                
+                statusDiv.innerHTML = '<div class="status success">✅ 분석 완료</div>';
+                
+                // Pod 정보 표시
+                let resultHtml = `
+                    <div class="analysis-result" style="margin-top: 16px;">
+                        <h3>Pod 정보</h3>
+                        <div style="background: #1f1f23; padding: 16px; border-radius: 4px; margin-bottom: 16px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                                <div><strong>이름:</strong> ${escapeHtml(podName)}</div>
+                                <div><strong>네임스페이스:</strong> ${escapeHtml(namespace)}</div>
+                                <div><strong>상태:</strong> <span class="status ${data.status === 'Running' ? 'success' : data.status === 'Pending' ? 'warning' : 'error'}" style="padding: 4px 8px; font-size: 12px;">${escapeHtml(data.status)}</span></div>
+                                <div><strong>노드:</strong> ${escapeHtml(data.podInfo?.node || 'N/A')}</div>
+                            </div>
+                        </div>
+                `;
+                
+                // 문제점 표시
+                if (data.issues && data.issues.length > 0) {
+                    resultHtml += `
+                        <h3 style="margin-top: 16px; color: #e57373;">⚠️ 발견된 문제</h3>
+                        <ul style="background: #1f1f23; padding: 16px; border-radius: 4px; border-left: 3px solid #e57373;">
+                            ${data.issues.map(issue => `<li style="margin: 8px 0;">${escapeHtml(issue)}</li>`).join('')}
+                        </ul>
+                    `;
+                }
+                
+                // AI 분석 결과
+                if (data.analysis) {
+                    resultHtml += `
+                        <h3 style="margin-top: 24px;">🤖 AI 분석 결과</h3>
+                        <div class="analysis-text">${safeHtml(data.analysis)}</div>
+                    `;
+                }
+                
+                resultHtml += '</div>';
+                resultDiv.innerHTML = resultHtml;
+                resultDiv.classList.remove('hidden');
+                
+                // 해당 섹션으로 스크롤
+                scrollToSection('section-pod-analysis');
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+                console.error('Pod analysis error:', e);
+            }
+        }
+        
+        // 섹션으로 스크롤
+        function scrollToSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (section) {
+                // 네비게이션 활성화
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    if (item.getAttribute('onclick')?.includes(sectionId)) {
+                        item.classList.add('active');
+                    }
+                });
+                
+                // 스크롤
+                const headerHeight = 80;
+                const navHeight = 0;
+                const offset = section.offsetTop - headerHeight - navHeight - 20;
+                window.scrollTo({
+                    top: offset,
+                    behavior: 'smooth'
+                });
+                
+                // 섹션 표시 및 데이터 로드
+                if (!section.classList.contains('visible')) {
+                    section.classList.add('visible');
+                    const sectionIdOnly = sectionId.replace('section-', '');
+                    if (!loadedSections.has(sectionId)) {
+                        loadSectionData(sectionId);
+                        loadedSections.add(sectionId);
+                    }
+                }
+            }
+        }
+        
+        // Pod 상태 모니터링
+        async function loadPodStatus() {
+            const summaryDiv = document.getElementById('podStatusSummary');
+            const detailsDiv = document.getElementById('podStatusDetails');
+            
+            summaryDiv.innerHTML = '<div class="loading"></div> 로딩 중...';
+            detailsDiv.innerHTML = '';
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/pods`);
+                const data = await res.json();
+                const pods = data.pods || [];
+                
+                // 노드 필터링
+                const selectedNode = document.getElementById('nodeSelector').value;
+                let filteredPods = pods;
+                if (selectedNode && selectedNode !== 'all') {
+                    filteredPods = pods.filter(pod => pod.node === selectedNode);
+                }
+                
+                // 상태별 집계
+                const statusCount = {};
+                filteredPods.forEach(pod => {
+                    const status = pod.status || 'Unknown';
+                    statusCount[status] = (statusCount[status] || 0) + 1;
+                });
+                
+                // 요약 카드
+                summaryDiv.innerHTML = Object.entries(statusCount).map(([status, count]) => {
+                    const color = status === 'Running' ? '#73bf69' : status === 'Pending' ? '#fdd835' : '#e57373';
+                    return `
+                        <div class="metric-card">
+                            <div class="metric-label">${status}</div>
+                            <div class="metric-value" style="color: ${color}">${count}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // 상세 테이블
+                if (filteredPods.length > 0) {
+                    detailsDiv.innerHTML = `
+                        <h3 style="margin-bottom: 16px;">Pod 상세 목록 ${selectedNode && selectedNode !== 'all' ? `(노드: ${selectedNode})` : ''}</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>네임스페이스</th>
+                                        <th>Pod 이름</th>
+                                        <th>상태</th>
+                                        <th>노드</th>
+                                        <th>생성 시간</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${filteredPods.map(pod => `
+                                        <tr>
+                                            <td>${escapeHtml(pod.namespace || '')}</td>
+                                            <td>${escapeHtml(pod.name || '')}</td>
+                                            <td>
+                                                <span class="status ${pod.status === 'Running' ? 'success' : pod.status === 'Pending' ? 'warning' : 'error'}" style="padding: 4px 8px; font-size: 12px;">
+                                                    ${escapeHtml(pod.status || 'Unknown')}
+                                                </span>
+                                            </td>
+                                            <td>${escapeHtml(pod.node || 'N/A')}</td>
+                                            <td>${new Date(pod.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    detailsDiv.innerHTML = '<div class="status warning">Pod가 없습니다</div>';
+                }
+            } catch (e) {
+                summaryDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+                detailsDiv.innerHTML = '';
+            }
+        }
+        
+        // 성능 메트릭 로드
+        async function loadPerformanceMetrics() {
+            await Promise.all([
+                loadLatency(),
+                loadErrorRate(),
+                loadThroughput(),
+                loadRequestsPerSecond()
+            ]);
+        }
+        
+        // Latency 로드
+        async function loadLatency() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/latency`);
+                const data = await res.json();
+                
+                const latencyValue = data.value || '0';
+                document.getElementById('latencyValue').textContent = `${latencyValue} ${data.unit || 'ms'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // 절대값 변화 또는 상대 퍼센트 변화 중 하나라도 임계값을 넘으면 변화로 표시
+                    // Latency: 절대값 0.001 이상 또는 상대 0.1% 이상
+                    const threshold = 0.001; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Latency는 증가하면 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Latency는 감소하면 좋음)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('latencyTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('latencyTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Latency error:', e);
+                document.getElementById('latencyValue').textContent = '-';
+            }
+        }
+        
+        // Error rate 로드
+        async function loadErrorRate() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/error-rate`);
+                const data = await res.json();
+                
+                const errorRateValue = data.value || '0';
+                document.getElementById('errorRateValue').textContent = `${errorRateValue} ${data.unit || '%'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Error rate: 절대값 0.0001 이상 또는 상대 0.01% 이상 (매우 작은 변화도 감지)
+                    const threshold = 0.0001; // 절대값 임계값
+                    const percentThreshold = 0.01; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Error rate 증가는 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(3)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Error rate 감소는 좋음)
+                            trendText = `${absTrendPercent.toFixed(3)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('errorRateTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('errorRateTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Error rate error:', e);
+                document.getElementById('errorRateValue').textContent = '-';
+            }
+        }
+        
+        // Throughput 로드
+        async function loadThroughput() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/throughput`);
+                const data = await res.json();
+                
+                const throughputValue = data.value || '0';
+                document.getElementById('throughputValue').textContent = `${throughputValue} ${data.unit || 'req/s'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Throughput: 절대값 0.001 이상 또는 상대 0.1% 이상
+                    const threshold = 0.001; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Throughput 증가는 좋음)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Throughput 감소는 나쁨)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('throughputTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('throughputTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Throughput error:', e);
+                document.getElementById('throughputValue').textContent = '-';
+            }
+        }
+        
+        // Requests per second 로드
+        async function loadRequestsPerSecond() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/requests-per-second`);
+                const data = await res.json();
+                
+                const rpsValue = data.value || '0';
+                document.getElementById('rpsValue').textContent = `${rpsValue} ${data.unit || 'req/s'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Reqs/sec: 절대값 0.01 이상 또는 상대 0.1% 이상
+                    const threshold = 0.01; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Reqs/sec 증가는 좋음)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Reqs/sec 감소는 나쁨)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('rpsTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('rpsTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Requests per second error:', e);
+                document.getElementById('rpsValue').textContent = '-';
+            }
+        }
+        
+        // 시스템 부하 메트릭 로드
+        async function loadSystemLoadMetrics() {
+            await Promise.all([
+                loadSaturation(),
+                loadQueueDepth(),
+                loadLoad()
+            ]);
+        }
+        
+        // Saturation 로드
+        async function loadSaturation() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/saturation`);
+                const data = await res.json();
+                
+                const saturationValue = data.value || '0';
+                document.getElementById('saturationValue').textContent = `${saturationValue} ${data.unit || '%'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Saturation: 절대값 0.1 이상 또는 상대 0.1% 이상
+                    const threshold = 0.1; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Saturation 증가는 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Saturation 감소는 좋음)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('saturationTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('saturationTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Saturation error:', e);
+                document.getElementById('saturationValue').textContent = '-';
+            }
+        }
+        
+        // Queue depth 로드
+        async function loadQueueDepth() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/queue-depth`);
+                const data = await res.json();
+                
+                const queueDepthValue = data.value || '0';
+                document.getElementById('queueDepthValue').textContent = `${queueDepthValue} ${data.unit || 'pods'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Queue depth: 절대값 0.1 이상 또는 상대 1% 이상
+                    const threshold = 0.1; // 절대값 임계값
+                    const percentThreshold = 1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Queue depth 증가는 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Queue depth 감소는 좋음)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('queueDepthTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('queueDepthTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Queue depth error:', e);
+                document.getElementById('queueDepthValue').textContent = '-';
+            }
+        }
+        
+        // Load 로드
+        async function loadLoad() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/load`);
+                const data = await res.json();
+                
+                const loadValue = data.value || '0';
+                document.getElementById('loadValue').textContent = `${loadValue} ${data.unit || ''}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Load: 절대값 0.01 이상 또는 상대 0.1% 이상
+                    const threshold = 0.01; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Load 증가는 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Load 감소는 좋음)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('loadTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('loadTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Load error:', e);
+                document.getElementById('loadValue').textContent = '-';
+            }
+        }
+        
+        // 가용성 및 예산 메트릭 로드
+        async function loadAvailabilityBudgetMetrics() {
+            await Promise.all([
+                loadAvailability(),
+                loadErrorBudget()
+            ]);
+        }
+        
+        // Availability 로드
+        async function loadAvailability() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/availability`);
+                const data = await res.json();
+                
+                const availabilityValue = data.value || '100';
+                document.getElementById('availabilityValue').textContent = `${availabilityValue} ${data.unit || '%'}`;
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Availability: 절대값 0.01 이상 또는 상대 0.01% 이상
+                    const threshold = 0.01; // 절대값 임계값
+                    const percentThreshold = 0.01; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Availability 증가는 좋음)
+                            trendText = `+${absTrendPercent.toFixed(2)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Availability 감소는 나쁨)
+                            trendText = `${absTrendPercent.toFixed(2)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('availabilityTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('availabilityTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Availability error:', e);
+                document.getElementById('availabilityValue').textContent = '-';
+            }
+        }
+        
+        // Error budget 로드
+        async function loadErrorBudget() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/metrics/error-budget`);
+                const data = await res.json();
+                
+                const errorBudgetValue = data.value || '0';
+                document.getElementById('errorBudgetValue').textContent = `${errorBudgetValue} ${data.unit || '%'}`;
+                
+                // 분 단위 표시
+                if (data.minutes !== undefined) {
+                    document.getElementById('errorBudgetMinutes').textContent = `(${data.minutes}분)`;
+                } else {
+                    document.getElementById('errorBudgetMinutes').textContent = '';
+                }
+                
+                // SLO 정보 표시 (선택사항)
+                if (data.sloTarget && data.currentAvailability) {
+                    const sloInfo = `SLO: ${data.sloTarget}% | 현재: ${data.currentAvailability}%`;
+                    // 필요시 추가 정보 표시
+                }
+                
+                // 추세 계산 (개선된 화살표 + 색상, 작은 변화도 감지)
+                if (data.timeline && data.timeline.length >= 2) {
+                    const recent = data.timeline.slice(-2);
+                    const trend = recent[1].value - recent[0].value;
+                    const trendPercent = recent[0].value > 0 ? ((trend / recent[0].value) * 100) : 0;
+                    const absTrendPercent = Math.abs(trendPercent);
+                    
+                    // Error budget: 절대값 0.001 이상 또는 상대 0.1% 이상
+                    const threshold = 0.001; // 절대값 임계값
+                    const percentThreshold = 0.1; // 상대 퍼센트 임계값
+                    
+                    let trendIcon, trendColor, trendText;
+                    if (Math.abs(trend) > threshold || absTrendPercent > percentThreshold) {
+                        if (trend > 0) {
+                            trendIcon = '↑';
+                            trendColor = '#e57373'; // 빨간색 (나쁨 - Error budget 증가는 나쁨)
+                            trendText = `+${absTrendPercent.toFixed(3)}%`;
+                        } else {
+                            trendIcon = '↓';
+                            trendColor = '#73bf69'; // 초록색 (좋음 - Error budget 감소는 좋음)
+                            trendText = `${absTrendPercent.toFixed(3)}%`;
+                        }
+                    } else {
+                        trendIcon = '→';
+                        trendColor = '#9e9e9e'; // 회색 (변화 없음)
+                        trendText = '0%';
+                    }
+                    
+                    document.getElementById('errorBudgetTrend').innerHTML = 
+                        `<span style="color: ${trendColor}; font-weight: 500;">${trendIcon} ${trendText}</span>`;
+                } else {
+                    document.getElementById('errorBudgetTrend').innerHTML = 
+                        `<span style="color: #9e9e9e;">→ 0%</span>`;
+                }
+            } catch (e) {
+                console.error('Error budget error:', e);
+                document.getElementById('errorBudgetValue').textContent = '-';
+            }
+        }
+        
+        // 조기 경고 로드
+        async function loadEarlyWarning() {
+            const summaryDiv = document.getElementById('earlyWarningSummary');
+            const alertsDiv = document.getElementById('earlyWarningList');
+            
+            summaryDiv.innerHTML = '<div class="loading"></div> 로딩 중...';
+            alertsDiv.innerHTML = '<div class="loading"></div> 로딩 중...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/alerts/early-warning`);
+                const data = await res.json();
+                const alerts = data.alerts || [];
+                
+                // 요약 카드
+                summaryDiv.innerHTML = `
+                    <div class="metric-card" style="padding: 20px; text-align: center;">
+                        <div class="metric-label" style="font-size: 14px; color: #9e9e9e; margin-bottom: 8px;">전체 알림</div>
+                        <div class="metric-value" style="font-size: 32px; font-weight: 600; color: #3274d9;">${data.total || 0}</div>
+                    </div>
+                    <div class="metric-card" style="padding: 20px; text-align: center;">
+                        <div class="metric-label" style="font-size: 14px; color: #9e9e9e; margin-bottom: 8px;">Critical</div>
+                        <div class="metric-value" style="font-size: 32px; font-weight: 600; color: #e57373;">${data.critical || 0}</div>
+                    </div>
+                    <div class="metric-card" style="padding: 20px; text-align: center;">
+                        <div class="metric-label" style="font-size: 14px; color: #9e9e9e; margin-bottom: 8px;">Warning</div>
+                        <div class="metric-value" style="font-size: 32px; font-weight: 600; color: #fdd835;">${data.warning || 0}</div>
+                    </div>
+                    <div class="metric-card" style="padding: 20px; text-align: center;">
+                        <div class="metric-label" style="font-size: 14px; color: #9e9e9e; margin-bottom: 8px;">Info</div>
+                        <div class="metric-value" style="font-size: 32px; font-weight: 600; color: #9e9e9e;">${data.info || 0}</div>
+                    </div>
+                `;
+                
+                // 알림 목록
+                if (alerts.length === 0) {
+                    alertsDiv.innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #9e9e9e;">
+                            <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                            <div style="font-size: 16px;">현재 이상 징후가 없습니다.</div>
+                        </div>
+                    `;
+                } else {
+                    alertsDiv.innerHTML = alerts.map((alert, index) => {
+                        const severityColor = {
+                            'critical': '#e57373',
+                            'warning': '#fdd835',
+                            'info': '#9e9e9e'
+                        }[alert.severity] || '#9e9e9e';
+                        
+                        const severityBg = {
+                            'critical': 'rgba(229, 115, 115, 0.1)',
+                            'warning': 'rgba(253, 216, 53, 0.1)',
+                            'info': 'rgba(158, 158, 158, 0.1)'
+                        }[alert.severity] || 'rgba(158, 158, 158, 0.1)';
+                        
+                        const severityIcon = {
+                            'critical': '🚨',
+                            'warning': '⚠️',
+                            'info': 'ℹ️'
+                        }[alert.severity] || 'ℹ️';
+                        
+                        return `
+                            <div class="alert-card" data-alert-index="${index}" style="
+                                border-left: 4px solid ${severityColor};
+                                background: ${severityBg};
+                                padding: 16px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                transition: all 0.2s;
+                            " onclick="showAlertDetails(${index}, ${JSON.stringify(alert).replace(/"/g, '&quot;')})">
+                                <div style="display: flex; align-items: start; gap: 12px;">
+                                    <div style="font-size: 24px;">${severityIcon}</div>
+                                    <div style="flex: 1;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <span style="
+                                                background: ${severityColor};
+                                                color: #fff;
+                                                padding: 2px 8px;
+                                                border-radius: 4px;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                text-transform: uppercase;
+                                            ">${alert.severity || 'info'}</span>
+                                            <span style="font-weight: 600; color: #d8d9da;">${escapeHtml(alert.metric || '알 수 없음')}</span>
+                                        </div>
+                                        <div style="color: #d8d9da; margin-bottom: 4px;">${escapeHtml(alert.message || '')}</div>
+                                        <div style="font-size: 12px; color: #9e9e9e;">
+                                            📍 ${escapeHtml(alert.location || '위치 정보 없음')} | 
+                                            💾 ${escapeHtml(alert.value || 'N/A')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                console.error('Early warning error:', e);
+                summaryDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+                alertsDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        // 경고 상세 정보 표시
+        function showAlertDetails(index, alert) {
+            // 모달 또는 상세 정보 표시
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            `;
+            
+            const severityColor = {
+                'critical': '#e57373',
+                'warning': '#fdd835',
+                'info': '#9e9e9e'
+            }[alert.severity] || '#9e9e9e';
+            
+            modal.innerHTML = `
+                <div style="
+                    background: #2b2b2f;
+                    border: 1px solid #3d3d42;
+                    border-radius: 8px;
+                    max-width: 600px;
+                    width: 100%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    padding: 24px;
+                ">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0; color: #d8d9da;">경고 상세 정보</h2>
+                        <button onclick="this.closest('div[style*=\"position: fixed\"]').remove()" style="
+                            background: transparent;
+                            border: none;
+                            color: #9e9e9e;
+                            font-size: 24px;
+                            cursor: pointer;
+                            padding: 0;
+                            width: 32px;
+                            height: 32px;
+                        ">×</button>
+                    </div>
+                    
+                    <div style="margin-bottom: 16px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                            <span style="
+                                background: ${severityColor};
+                                color: #fff;
+                                padding: 4px 12px;
+                                border-radius: 4px;
+                                font-size: 12px;
+                                font-weight: 600;
+                                text-transform: uppercase;
+                            ">${alert.severity || 'info'}</span>
+                            <span style="font-weight: 600; color: #d8d9da; font-size: 18px;">${escapeHtml(alert.metric || '알 수 없음')}</span>
+                        </div>
+                        <div style="color: #d8d9da; margin-bottom: 8px; font-size: 16px;">${escapeHtml(alert.message || '')}</div>
+                        <div style="font-size: 14px; color: #9e9e9e;">
+                            📍 위치: ${escapeHtml(alert.location || '위치 정보 없음')}<br>
+                            💾 값: ${escapeHtml(alert.value || 'N/A')}
+                        </div>
+                    </div>
+                    
+                    ${alert.analysis ? `
+                        <div style="margin-bottom: 16px;">
+                            <h3 style="color: #d8d9da; margin-bottom: 8px; font-size: 16px;">분석</h3>
+                            <div style="
+                                background: #1f1f23;
+                                padding: 12px;
+                                border-radius: 4px;
+                                color: #d8d9da;
+                                white-space: pre-wrap;
+                                font-size: 14px;
+                                line-height: 1.6;
+                            ">${escapeHtml(alert.analysis)}</div>
+                        </div>
+                    ` : ''}
+                    
+                    ${alert.solutions && alert.solutions.length > 0 ? `
+                        <div>
+                            <h3 style="color: #d8d9da; margin-bottom: 8px; font-size: 16px;">해결책</h3>
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                ${alert.solutions.map((solution, idx) => `
+                                    <div style="
+                                        background: #1f1f23;
+                                        padding: 12px;
+                                        border-radius: 4px;
+                                        border-left: 3px solid ${severityColor};
+                                    ">
+                                        <div style="font-weight: 600; color: #d8d9da; margin-bottom: 4px;">${escapeHtml(solution.name || `해결책 ${idx + 1}`)}</div>
+                                        <div style="font-size: 13px; color: #9e9e9e; margin-bottom: 4px;">${escapeHtml(solution.description || '')}</div>
+                                        ${solution.command ? `
+                                            <div style="
+                                                background: #2b2b2f;
+                                                padding: 8px;
+                                                border-radius: 4px;
+                                                font-family: monospace;
+                                                font-size: 12px;
+                                                color: #73bf69;
+                                                margin-top: 4px;
+                                            ">${escapeHtml(solution.command)}</div>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
+        
+        // 노드 상태 모니터링
+        async function loadNodeStatus() {
+            const summaryDiv = document.getElementById('nodeStatusSummary');
+            const detailsDiv = document.getElementById('nodeStatusDetails');
+            
+            summaryDiv.innerHTML = '<div class="loading"></div> 로딩 중...';
+            detailsDiv.innerHTML = '';
+            
+            try {
+                const res = await fetch(`${API_BASE}/k8s/nodes`);
+                const data = await res.json();
+                const nodes = data.nodes || [];
+                
+                // 상태별 집계
+                const statusCount = {};
+                nodes.forEach(node => {
+                    const status = node.status || 'Unknown';
+                    statusCount[status] = (statusCount[status] || 0) + 1;
+                });
+                
+                // 요약 카드
+                summaryDiv.innerHTML = Object.entries(statusCount).map(([status, count]) => {
+                    const color = status === 'Ready' ? '#73bf69' : '#e57373';
+                    return `
+                        <div class="metric-card">
+                            <div class="metric-label">${status}</div>
+                            <div class="metric-value" style="color: ${color}">${count}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // 상세 테이블
+                if (nodes.length > 0) {
+                    detailsDiv.innerHTML = `
+                        <h3 style="margin-bottom: 16px;">노드 상세 목록</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width: 200px;">노드 이름</th>
+                                        <th>상태</th>
+                                        <th>CPU</th>
+                                        <th>Memory</th>
+                                        <th>Pod 용량</th>
+                                        <th>배포된 Pod</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${nodes.map((node, idx) => {
+                                        const podList = node.podList || [];
+                                        const nodeId = `node-${idx}`;
+                                        return `
+                                        <tr>
+                                            <td>
+                                                <strong style="cursor: pointer; color: #3274d9;" onclick="toggleNodePods('${nodeId}')">
+                                                    ${escapeHtml(node.name || '')} 
+                                                    ${podList.length > 0 ? `(${podList.length})` : '(0)'}
+                                                    <span id="toggle-${nodeId}" style="font-size: 12px;">▼</span>
+                                                </strong>
+                                            </td>
+                                            <td>
+                                                <span class="status ${node.status === 'Ready' ? 'success' : 'error'}" style="padding: 4px 8px; font-size: 12px;">
+                                                    ${escapeHtml(node.status || 'Unknown')}
+                                                </span>
+                                            </td>
+                                            <td>${escapeHtml(node.cpu || 'N/A')}</td>
+                                            <td>${escapeHtml(node.memory || 'N/A')}</td>
+                                            <td>${escapeHtml(node.pods || 'N/A')}</td>
+                                            <td>
+                                                <span style="font-size: 12px; color: #666;">
+                                                    ${podList.length}개 Pod
+                                                </span>
+                                            </td>
+                                        </tr>
+                                        <tr id="${nodeId}" style="display: none;">
+                                            <td colspan="6" style="padding: 16px; background: #f8f9fa; border-top: none;">
+                                                ${podList.length > 0 ? `
+                                                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px;">
+                                                        ${podList.map(pod => `
+                                                            <div style="padding: 12px; background: white; border-radius: 6px; border: 1px solid #e0e0e0;">
+                                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                                                    <strong style="font-size: 13px; color: #333;">${escapeHtml(pod.name)}</strong>
+                                                                    <span class="status ${pod.status === 'Running' ? 'success' : pod.status === 'Pending' ? 'warning' : 'error'}" style="padding: 2px 6px; font-size: 11px;">
+                                                                        ${escapeHtml(pod.status)}
+                                                                    </span>
+                                                                </div>
+                                                                <div style="font-size: 11px; color: #666;">
+                                                                    <div>네임스페이스: ${escapeHtml(pod.namespace)}</div>
+                                                                    <div>컨테이너: ${pod.containers}개</div>
+                                                                    <div>Ready: ${pod.ready ? '✅' : '❌'}</div>
+                                                                </div>
+                                                            </div>
+                                                        `).join('')}
+                                                    </div>
+                                                ` : '<div style="color: #999; font-size: 13px;">이 노드에 배포된 Pod가 없습니다.</div>'}
+                                            </td>
+                                        </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    detailsDiv.innerHTML = '<div class="status warning">노드가 없습니다</div>';
+                }
+            } catch (e) {
+                summaryDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+                detailsDiv.innerHTML = '';
+            }
+        }
+        
+        // 노드 Pod 목록 토글 함수
+        function toggleNodePods(nodeId) {
+            const row = document.getElementById(nodeId);
+            const toggle = document.getElementById(`toggle-${nodeId}`);
+            if (row) {
+                if (row.style.display === 'none') {
+                    row.style.display = 'table-row';
+                    if (toggle) toggle.textContent = '▲';
+                } else {
+                    row.style.display = 'none';
+                    if (toggle) toggle.textContent = '▼';
+                }
+            }
+        }
+        
+        // AI 분석 함수들
+        async function analyzeMetrics() {
+            const k8sQuery = document.getElementById('k8sMetricsQuery').value;
+            const customQuery = document.getElementById('metricsQuery').value;
+            const query = customQuery || k8sQuery;
+            
+            const statusDiv = document.getElementById('metricsStatus');
+            statusDiv.innerHTML = '<div class="loading"></div> 분석 중...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/analyze/metrics`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, startTime: Date.now() - 3600000, endTime: Date.now() })
+                });
+                
+                const data = await res.json();
+                statusDiv.innerHTML = '<div class="status success">분석 완료</div>';
+                
+                if (data.analysis) {
+                    const analysisDiv = document.getElementById('metricsAnalysis');
+                    analysisDiv.innerHTML = `
+                        <div class="analysis-result">
+                            <h3>AI 분석 결과</h3>
+                            <div class="analysis-text">${safeHtml(data.analysis)}</div>
+                        </div>
+                    `;
+                    analysisDiv.classList.remove('hidden');
+                }
+                
+                if (data.graphData && data.graphData.length > 0) {
+                    const chartDiv = document.getElementById('metricsChart');
+                    chartDiv.classList.remove('hidden');
+                    const ctx = document.createElement('canvas');
+                    chartDiv.innerHTML = '';
+                    chartDiv.appendChild(ctx);
+                    
+                    if (charts.metricsChart) charts.metricsChart.destroy();
+                    charts.metricsChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.graphData.map(d => new Date(d.timestamp * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' })),
+                            datasets: [{
+                                label: query,
+                                data: data.graphData.map(d => parseFloat(d.value)),
+                                borderColor: '#3274d9',
+                                backgroundColor: 'rgba(50, 116, 217, 0.1)',
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { labels: { color: '#d8d9da' } }
+                            },
+                            scales: {
+                                y: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } },
+                                x: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } }
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        async function analyzeLogs() {
+            const level = document.getElementById('logLevel').value;
+            const hours = parseInt(document.getElementById('logHours').value);
+            const podName = document.getElementById('podName').value;
+            const namespace = document.getElementById('namespace').value;
+            
+            const statusDiv = document.getElementById('logsStatus');
+            statusDiv.innerHTML = '<div class="loading"></div> 분석 중...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/analyze/logs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        level,
+                        podName: podName || undefined,
+                        namespace: namespace || undefined,
+                        startTime: Date.now() - hours * 3600000,
+                        endTime: Date.now()
+                    })
+                });
+                
+                const data = await res.json();
+                statusDiv.innerHTML = '<div class="status success">분석 완료</div>';
+                
+                if (data.analysis) {
+                    const analysisDiv = document.getElementById('logsAnalysis');
+                    analysisDiv.innerHTML = `
+                        <div class="analysis-result">
+                            <h3>AI 분석 결과</h3>
+                            <div class="analysis-text">${safeHtml(data.analysis)}</div>
+                        </div>
+                    `;
+                    analysisDiv.classList.remove('hidden');
+                }
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        async function analyzeTraces() {
+            const service = document.getElementById('traceService').value;
+            
+            const statusDiv = document.getElementById('tracesStatus');
+            statusDiv.innerHTML = '<div class="loading"></div> 분석 중...';
+            
+            try {
+                const res = await fetch(`${API_BASE}/analyze/traces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ service, startTime: Date.now() - 3600000, endTime: Date.now() })
+                });
+                
+                const data = await res.json();
+                statusDiv.innerHTML = '<div class="status success">분석 완료</div>';
+                
+                if (data.analysis) {
+                    const analysisDiv = document.getElementById('tracesAnalysis');
+                    analysisDiv.innerHTML = `
+                        <div class="analysis-result">
+                            <h3>AI 분석 결과</h3>
+                            <div class="analysis-text">${safeHtml(data.analysis)}</div>
+                        </div>
+                    `;
+                    analysisDiv.classList.remove('hidden');
+                }
+                
+                if (data.traceData && data.traceData.length > 0) {
+                    const chartDiv = document.getElementById('tracesChart');
+                    chartDiv.classList.remove('hidden');
+                    const ctx = document.createElement('canvas');
+                    chartDiv.innerHTML = '';
+                    chartDiv.appendChild(ctx);
+                    
+                    if (charts.tracesChart) charts.tracesChart.destroy();
+                    charts.tracesChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: data.traceData.map(d => d.service || 'Unknown'),
+                            datasets: [{
+                                label: '응답 시간 (ms)',
+                                data: data.traceData.map(d => d.duration || 0),
+                                backgroundColor: '#3274d9'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { labels: { color: '#d8d9da' } }
+                            },
+                            scales: {
+                                y: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } },
+                                x: { ticks: { color: '#9e9e9e' }, grid: { color: '#3d3d42' } }
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                statusDiv.innerHTML = `<div class="status error">에러: ${e.message}</div>`;
+            }
+        }
+        
+        // 노드 목록 로드
+        async function loadNodes() {
+            try {
+                const res = await fetch(`${API_BASE}/k8s/nodes`);
+                const data = await res.json();
+                const select = document.getElementById('nodeSelector');
+                
+                // 기존 옵션 유지 (모든 노드)
+                const allOption = select.querySelector('option[value="all"]');
+                select.innerHTML = '';
+                select.appendChild(allOption);
+                
+                // 노드 옵션 추가
+                (data.nodes || []).forEach(node => {
+                    const option = document.createElement('option');
+                    option.value = node.name;
+                    option.textContent = `${node.name} (${node.status})`;
+                    select.appendChild(option);
+                });
+                
+                // 노드 선택 이벤트 리스너 추가
+                select.addEventListener('change', function() {
+                    const selectedNode = this.value;
+                    // Pod 상태 모니터링이 로드되어 있으면 새로고침
+                    if (loadedSections.has('section-pod-status')) {
+                        loadPodStatus();
+                    }
+                });
+            } catch (e) {
+                console.error('Load nodes error:', e);
+            }
+        }
+        
+        // 페이지 로드 시 초기화
+        window.addEventListener('load', () => {
+            loadNodes();
+            handleScroll(); // 초기 로드 시 첫 번째 섹션 표시
+            
+            // 주기적 새로고침 (30초마다)
+            setInterval(() => {
+                if (loadedSections.has('section-cluster-overview')) {
+                    loadClusterStats();
+                }
+                if (loadedSections.has('section-resources')) {
+                    if (selectedPod) {
+                        loadContainerCpu();
+                        loadContainerMemory();
+                        loadPodCpu();
+                        loadPodMemory();
+                    }
+                }
+                if (loadedSections.has('section-performance-metrics')) {
+                    loadPerformanceMetrics();
+                }
+                if (loadedSections.has('section-system-load')) {
+                    loadSystemLoadMetrics();
+                }
+                if (loadedSections.has('section-availability-budget')) {
+                    loadAvailabilityBudgetMetrics();
+                }
+                if (loadedSections.has('section-early-warning')) {
+                    loadEarlyWarning();
+                }
+                if (loadedSections.has('section-pod-status')) {
+                    loadPodStatus();
+                }
+                if (loadedSections.has('section-node-status')) {
+                    loadNodeStatus();
+                }
+            }, 30000);
+        });
+        
+        // 스크롤 이벤트 리스너
+        window.addEventListener('scroll', handleScroll);
+        window.addEventListener('resize', handleScroll);
+    </script>
+</body>
+</html>

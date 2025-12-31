@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: community-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: community-backend
+  template:
+    metadata:
+      labels:
+        app: community-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: community-backend
+        image: 192.168.0.170:30000/alphacar/alphacar-community:1.0.32-c1d0917
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3005
+          name: http-community # Istio 인식용 포트 이름
+        env:
+        - name: PORT
+          value: "3005"
+        - name: SERVICE_NAME
+          value: "community-backend"
+        # ConfigMap (alphacar-be-config) 참조
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_PORT
+        # Secret (alphacar-be-secret) 참조
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_DB_NAME
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: community-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: community-backend
+  ports:
+  - port: 3005
+    targetPort: 3005
+    protocol: TCP
+    name: http-community # Istio 프로토콜 분석용 접두사 추가
+  type: ClusterIP

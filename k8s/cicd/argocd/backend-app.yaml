@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alphacar-backend
+  namespace: argocd   # ArgoCD가 설치된 네임스페이스
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/Alphacar-project/alphacar-k8s.git'
+    targetRevision: main
+    path: 'k8s/backend/deploy' # <--- 실제 백엔드 파일들이 있는 '그 폴더'를 지정
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: apc-be-ns      # 실제 서비스가 배포될 곳
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

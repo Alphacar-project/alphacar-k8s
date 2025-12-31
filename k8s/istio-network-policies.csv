@@ -1,0 +1,11 @@
+Type,NS,name,policyTypes,Key,Value,Rules,Description
+AuthorizationPolicy,apc-be-ns,aichat-backend-authz-policy,ALLOW,app,aichat-backend,"from: istio-gateway/apc-fe-ns/apc-be-ns, to: port 4000","AI 채팅 백엔드 접근 제어. Istio Gateway, 프론트엔드, 백엔드 네임스페이스에서 포트 4000 접근 허용"
+AuthorizationPolicy,apc-be-ns,backend-egress-authz-policy,ALLOW,component,backend,"to: apc-db-ns (27017,3306,6379), apc-obsv-ns (4317,4318)","백엔드 서비스의 아웃바운드 트래픽 제어. 데이터베이스(MySQL, MongoDB, Redis) 및 관찰성(OpenTelemetry) 포트만 허용"
+AuthorizationPolicy,apc-be-ns,community-backend-authz-policy,ALLOW,app,community-backend,"from: istio-gateway/apc-fe-ns/apc-be-ns, to: port 3005","커뮤니티 백엔드 접근 제어. Istio Gateway, 프론트엔드, 백엔드 네임스페이스에서 포트 3005 접근 허용"
+AuthorizationPolicy,apc-be-ns,news-backend-authz-policy,ALLOW,app,news-backend,"from: istio-gateway/apc-fe-ns/apc-be-ns, to: port 3008","뉴스 백엔드 접근 제어. Istio Gateway, 프론트엔드, 백엔드 네임스페이스에서 포트 3008 접근 허용"
+AuthorizationPolicy,apc-be-ns,quote-backend-authz-policy,ALLOW,app,quote-backend,"from: istio-gateway/apc-fe-ns/apc-be-ns, to: port 3003","견적 백엔드 접근 제어. Istio Gateway, 프론트엔드, 백엔드 네임스페이스에서 포트 3003 접근 허용"
+AuthorizationPolicy,apc-be-ns,search-backend-authz-policy,ALLOW,app,search-backend,"from: istio-gateway/apc-fe-ns/apc-be-ns, to: port 3007","검색 백엔드 접근 제어. Istio Gateway, 프론트엔드, 백엔드 네임스페이스에서 포트 3007 접근 허용"
+AuthorizationPolicy,apc-db-ns,database-authz-policy,ALLOW,component,database,"from: apc-be-ns/apc-db-ns/apc-ek-ns(Monstache)/apc-striming-ns(Kafka), to: ports 27017/3306/6379","데이터베이스 접근 제어. 백엔드, 데이터베이스, Elasticsearch(Monstache), Kafka 네임스페이스에서 MongoDB(27017), MySQL(3306), Redis(6379) 포트 접근 허용"
+NetworkPolicy,apc-db-ns,database-strict-policy,"Ingress, Egress",component,database,"Ingress: apc-be-ns→27017/6379(TCP), apc-db-ns→27017(TCP), apc-ek-ns(Monstache)→27017(TCP), apc-striming-ns(Kafka)→27017(TCP); Egress: DNS(53/UDP), apc-db-ns→27017(TCP)","데이터베이스 네트워크 격리 정책. 백엔드, Monstache, Kafka에서 MongoDB 접근 허용. 외부 네트워크 접근 차단. Egress는 DNS 및 동일 네임스페이스 내 MongoDB 통신만 허용"
+NetworkPolicy,apc-striming-ns,kafka-cluster-network-policy-kafka,Ingress,"strimzi.io/cluster, strimzi.io/kind, strimzi.io/name","kafka-cluster, Kafka, kafka-cluster-kafka","Ingress: Kafka 클러스터 Pod→9090/9091/9092/9093/8443(TCP)","Kafka 클러스터 네트워크 정책. Strimzi Operator가 자동 생성. Kafka 브로커 간 통신 및 클러스터 운영자 접근만 허용"
+

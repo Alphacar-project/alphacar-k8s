@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apc-fe-config
+  namespace: apc-fe-ns
+data:
+  NEXT_PUBLIC_AICHAT_URL: http://aichat-backend.apc-be-ns.svc.cluster.local:4000
+  NEXT_PUBLIC_API_BASE_URL: http://main-backend.apc-be-ns.svc.cluster.local:3002
+
+
+
+
+
+
+

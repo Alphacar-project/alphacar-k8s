@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: apc-fe-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      serviceAccountName: frontend-sa
+      containers:
+      - name: frontend
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.0.2
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: API_URL
+          value: "https://alphacar.cloud/api"
+        - name: PORT
+          value: "8000"
+        - name: NEXT_PUBLIC_BASE_URL
+          value: "https://alphacar.cloud"
+        - name: NEXT_PUBLIC_DOMAIN
+          value: "https://alphacar.cloud"
+        - name: NEXT_PUBLIC_KAKAO_MAP_API_KEY
+          value: "c0a234db004e5673a965dcd0025df859"
+        - name: NODE_EXTRA_CA_CERTS
+          value: "/etc/ssl/certs/selfsigned.crt"
+        - name: NEXT_PUBLIC_AICHAT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: apc-fe-config
+              key: NEXT_PUBLIC_AICHAT_URL
+        - name: NEXT_PUBLIC_API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: apc-fe-config
+              key: NEXT_PUBLIC_API_BASE_URL
+        volumeMounts:
+        - name: ssl-cert
+          mountPath: /etc/ssl/certs/selfsigned.crt
+          subPath: selfsigned.crt
+          readOnly: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: ssl-cert
+        secret:
+          secretName: ssl-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: apc-fe-ns
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http-web
+  type: LoadBalancer

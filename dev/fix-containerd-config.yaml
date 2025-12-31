@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fix-containerd-config
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: fix-containerd-config
+  template:
+    metadata:
+      labels:
+        name: fix-containerd-config
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: fix-config
+        image: busybox
+        command:
+        - sh
+        - -c
+        - |
+          REGISTRY="192.168.0.170:30000"
+          
+          # 설정 파일 확인
+          if [ ! -f /host/etc/containerd/config.toml ]; then
+            echo "설정 파일이 없습니다. 기본 설정을 생성합니다..."
+            mkdir -p /host/etc/containerd
+            containerd config default > /host/etc/containerd/config.toml
+          fi
+          
+          # 이미 설정되어 있는지 확인
+          if grep -q "$REGISTRY" /host/etc/containerd/config.toml; then
+            echo "이미 설정되어 있습니다."
+            exit 0
+          fi
+          
+          # mirrors 섹션에 추가
+          if ! grep -q "\[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors\]" /host/etc/containerd/config.toml; then
+            sed -i '/\[plugins."io.containerd.grpc.v1.cri".registry\]/a\[plugins."io.containerd.grpc.v1.cri".registry.mirrors]' /host/etc/containerd/config.toml
+          fi
+          
+          sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors\]/a\        [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"$REGISTRY\"]\n          endpoint = [\"http://$REGISTRY\"]" /host/etc/containerd/config.toml
+          
+          # configs 섹션에 추가
+          if ! grep -q "\[plugins.\"io.containerd.grpc.v1.cri\".registry.configs\]" /host/etc/containerd/config.toml; then
+            sed -i '/\[plugins."io.containerd.grpc.v1.cri".registry.mirrors\]/a\[plugins."io.containerd.grpc.v1.cri".registry.configs]' /host/etc/containerd/config.toml
+          fi
+          
+          sed -i "/\[plugins.\"io.containerd.grpc.v1.cri\".registry.configs\]/a\        [plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"$REGISTRY\".tls]\n          insecure_skip_verify = true" /host/etc/containerd/config.toml
+          
+          # containerd 재시작
+          systemctl daemon-reload
+          systemctl restart containerd
+          
+          echo "설정 완료"
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-etc
+          mountPath: /host/etc
+        - name: host-systemd
+          mountPath: /host/run/systemd
+      volumes:
+      - name: host-etc
+        hostPath:
+          path: /etc
+      - name: host-systemd
+        hostPath:
+          path: /run/systemd
+      tolerations:
+      - operator: Exists
+

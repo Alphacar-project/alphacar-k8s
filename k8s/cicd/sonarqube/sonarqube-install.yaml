@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+      - name: sonarqube
+        image: sonarqube:lts-community
+        ports:
+        - containerPort: 9000
+        env:
+        - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
+          value: "true"
+        # 전체 2Gi(2048MB) 중 핵심 프로세스에 효율적으로 배분
+        - name: SONAR_WEB_JAVAOPTS
+          value: "-Xmx768m -Xms768m"
+        - name: SONAR_CE_JAVAOPTS
+          value: "-Xmx512m -Xms512m"
+        - name: SONAR_ES_JAVAOPTS
+          value: "-Xmx512m -Xms512m"
+        resources:
+          requests:
+            memory: "1.5Gi"   # 최소 예약량을 조금 더 높여 안정성 확보
+            cpu: "500m"
+          limits:
+            memory: "2Gi"     # 요청하신 대로 2Gi 유지
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  namespace: apc-cicd-ns
+spec:
+  type: NodePort
+  ports:
+  - port: 9000         # 내부 포트 (9000이 표준입니다)
+    targetPort: 9000
+    nodePort: 32000    # 외부 접속 포트
+  selector:
+    app: sonarqube

@@ -1,0 +1,101 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: main-backend-scaler
+  namespace: apc-be-ns
+spec:
+  scaleTargetRef:
+    name: main-backend
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 30
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+    - type: prometheus
+      metadata:
+        # [수정됨] 확인된 ClusterIP 사용 (기존 192.168... 제거)
+        serverAddress: http://10.100.97.182:9090
+        metricName: http_requests_total
+        # 쿼리: main-backend 작업의 최근 2분간 요청 수 합계
+        query: sum(rate(http_requests_total{job="main-backend"}[30s]))
+        threshold: "10"
+        # 데이터가 없을 때 0으로 처리 (에러 방지용 안전 장치)
+        ignoreNullValues: "true"
+---
+# 1. Quote Backend Scaler (견적 서비스)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: quote-backend-scaler
+  namespace: apc-be-ns
+spec:
+  scaleTargetRef:
+    name: quote-backend
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 60
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+    - type: prometheus
+      metadata:
+        serverAddress: http://10.100.97.182:9090
+        metricName: http_requests_total
+        query: sum(rate(http_requests_total{job="quote-backend"}[2m]))
+        threshold: "50"
+        ignoreNullValues: "true"
+---
+# 2. Search Backend Scaler (검색 서비스)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: search-backend-scaler
+  namespace: apc-be-ns
+spec:
+  scaleTargetRef:
+    name: search-backend
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 60
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+    - type: prometheus
+      metadata:
+        serverAddress: http://10.100.97.182:9090
+        metricName: http_requests_total
+        query: sum(rate(http_requests_total{job="search-backend"}[2m]))
+        threshold: "50"
+        ignoreNullValues: "true"
+---
+# 3. AiChat Backend Scaler (AI 채팅 서비스) - 설정 주의!
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: aichat-backend-scaler
+  namespace: apc-be-ns
+spec:
+  scaleTargetRef:
+    name: aichat-backend
+  minReplicaCount: 1  # AI는 초기 로딩이 느릴 수 있어 1개 유지를 권장 (0으로 하면 첫 응답 지연 가능성)
+  maxReplicaCount: 10
+  cooldownPeriod: 60
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "50" # AI는 CPU 부하에 민감하므로 50%로 조금 더 빨리 반응하게 설정
+    - type: prometheus
+      metadata:
+        serverAddress: http://10.100.97.182:9090
+        metricName: http_requests_total
+        query: sum(rate(http_requests_total{job="aichat-backend"}[2m]))
+        threshold: "20" # [중요] AI 요청은 처리 시간이 길므로 50보다는 낮게(20 정도) 설정 추천
+        ignoreNullValues: "true"

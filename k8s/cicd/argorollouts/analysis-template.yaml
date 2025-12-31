@@ -1,0 +1,97 @@
+# Analysis Template 예제
+# 메트릭 기반 자동 승인/롤백을 위한 템플릿
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: apc-be-ns
+spec:
+  metrics:
+  # 1. 성공률 메트릭
+  - name: success-rate
+    interval: 30s
+    successCondition: result[0] >= 0.95  # 95% 이상 성공률
+    failureCondition: result[0] < 0.90    # 90% 미만이면 실패
+    failureLimit: 3  # 3번 연속 실패 시 롤백
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring:9090  # Prometheus 주소
+        query: |
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="{{args.service-name}}",
+            response_code!~"5.."
+          }[5m]))
+          /
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="{{args.service-name}}"
+          }[5m]))
+  
+  # 2. 에러율 메트릭
+  - name: error-rate
+    interval: 30s
+    successCondition: result[0] <= 0.05  # 5% 이하 에러율
+    failureCondition: result[0] > 0.10    # 10% 초과 시 실패
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring:9090
+        query: |
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="{{args.service-name}}",
+            response_code=~"5.."
+          }[5m]))
+          /
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="{{args.service-name}}"
+          }[5m]))
+  
+  # 3. 응답 시간 메트릭 (P95)
+  - name: p95-latency
+    interval: 30s
+    successCondition: result[0] <= 500  # 500ms 이하
+    failureCondition: result[0] > 1000  # 1000ms 초과 시 실패
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring:9090
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(istio_request_duration_milliseconds_bucket{
+              reporter="source",
+              destination_service_name="{{args.service-name}}"
+            }[5m])) by (le)
+          )
+---
+# Analysis Run 예제 (수동 실행용)
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisRun
+metadata:
+  name: main-backend-analysis
+  namespace: apc-be-ns
+spec:
+  metrics:
+  - name: success-rate
+    interval: 30s
+    successCondition: result[0] >= 0.95
+    failureCondition: result[0] < 0.90
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring:9090
+        query: |
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="main-backend",
+            response_code!~"5.."
+          }[5m]))
+          /
+          sum(rate(istio_requests_total{
+            reporter="source",
+            destination_service_name="main-backend"
+          }[5m]))
+

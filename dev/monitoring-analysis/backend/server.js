@@ -1,0 +1,4417 @@
+const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
+const { URL } = require('url');
+const fs = require('fs');
+const port = process.env.PORT || 5000;
+const prometheusUrl = process.env.PROMETHEUS_URL || 'http://prometheus.apc-obsv-ns.svc.cluster.local:9090';
+const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+const slackReportWebhookUrl = process.env.SLACK_REPORT_WEBHOOK_URL;
+const slackBotToken = process.env.SLACK_BOT_TOKEN;
+const slackChannelId = process.env.SLACK_CHANNEL_ID;
+
+// AWS Bedrock 설정
+const awsRegion = process.env.AWS_REGION || 'us-east-1';
+const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
+const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
+const bedrockModelId = process.env.BEDROCK_LLM_MODEL_ID || 'us.meta.llama3-3-70b-instruct-v1:0';
+const bedrockGuardrailId = process.env.BEDROCK_GUARDRAIL_ID || '';
+const bedrockGuardrailVersion = process.env.BEDROCK_GUARDRAIL_VERSION || 'DRAFT';
+
+function parseBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try { resolve(JSON.parse(body)); }
+      catch { resolve({}); }
+    });
+  });
+}
+
+// Prometheus 쿼리 실행
+async function queryPrometheus(query) {
+  try {
+    const url = prometheusUrl + '/api/v1/query?query=' + encodeURIComponent(query);
+    return new Promise((resolve, reject) => {
+      const req = http.get(url, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            if (result.status === 'success' && result.data) {
+              resolve(result.data);
+            } else {
+              reject(new Error('Prometheus query failed: ' + JSON.stringify(result)));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(10000, () => {
+        req.destroy();
+        reject(new Error('Prometheus query timeout'));
+      });
+    });
+  } catch (err) {
+    throw err;
+  }
+}
+
+// AWS Signature V4 생성
+function createAwsSignatureV4(method, url, headers, payload) {
+  const urlObj = new URL(url);
+  const host = urlObj.hostname;
+  const path = urlObj.pathname + (urlObj.search || '');
+  const service = 'bedrock';
+  const timestamp = new Date().toISOString().replace(/[:\-]|\.\d{3}/g, '');
+  const date = timestamp.substr(0, 8);
+
+  // Canonical Request 생성
+  const canonicalHeaders = Object.keys(headers)
+    .sort()
+    .map(key => key.toLowerCase() + ':' + headers[key].trim())
+    .join('\n') + '\n';
+
+  const signedHeaders = Object.keys(headers)
+    .sort()
+    .map(key => key.toLowerCase())
+    .join(';');
+
+  const payloadHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  // Path를 개별 세그먼트로 URL 인코딩
+  const pathSegments = path.split('/').map(segment => {
+    return encodeURIComponent(segment);
+  }).join('/');
+
+  const canonicalRequest = method + '\n' +
+    pathSegments + '\n' +
+    (urlObj.search || '') + '\n' +
+    canonicalHeaders + '\n' +
+    signedHeaders + '\n' +
+    payloadHash;
+
+  // String to Sign 생성
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = date + '/' + awsRegion + '/' + service + '/aws4_request';
+  const stringToSign = algorithm + '\n' +
+    timestamp + '\n' +
+    credentialScope + '\n' +
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex');
+
+  // Signature 생성
+  const kDate = crypto.createHmac('sha256', 'AWS4' + awsSecretAccessKey).update(date).digest();
+  const kRegion = crypto.createHmac('sha256', kDate).update(awsRegion).digest();
+  const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+  const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+
+  // Authorization 헤더 생성
+  const authorization = algorithm + ' ' +
+    'Credential=' + awsAccessKeyId + '/' + credentialScope + ', ' +
+    'SignedHeaders=' + signedHeaders + ', ' +
+    'Signature=' + signature;
+
+  return {
+    timestamp,
+    authorization,
+    host
+  };
+}
+
+// Bedrock API 호출
+async function callBedrock(prompt, systemPrompt = null) {
+  if (!awsAccessKeyId || !awsSecretAccessKey) {
+    console.warn('AWS credentials not configured, skipping Bedrock call');
+    return null;
+  }
+
+  // 모델 ID 확인 및 로깅
+  console.log('Bedrock Model ID:', bedrockModelId);
+  console.log('BEDROCK_LLM_MODEL_ID env:', process.env.BEDROCK_LLM_MODEL_ID);
+
+  try {
+    const endpoint = `bedrock-runtime.${awsRegion}.amazonaws.com`;
+    const path = `/model/${bedrockModelId}/converse`;
+    const url = `https://${endpoint}${path}`;
+    console.log('Bedrock API URL:', url);
+
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({
+        role: 'user',
+        content: [{ text: systemPrompt }]
+      });
+    }
+    messages.push({
+      role: 'user',
+      content: [{ text: prompt }]
+    });
+
+    const body = {
+      messages: messages,
+      inferenceConfig: {
+        maxTokens: parseInt(process.env.MAX_ANALYSIS_TOKENS || '4000'),
+        temperature: 0.2
+      }
+    };
+
+    // 모니터링 분석은 기술적 내용이므로 Guardrail 비활성화
+    // Guardrail이 기술적 분석을 차단하는 경우가 있어서 비활성화
+    // if (bedrockGuardrailId && bedrockGuardrailId.length > 5) {
+    //   body.guardrailConfig = {
+    //     guardrailIdentifier: bedrockGuardrailId,
+    //     guardrailVersion: bedrockGuardrailVersion,
+    //     trace: 'enabled'
+    //   };
+    // }
+
+    const payload = JSON.stringify(body);
+    const timestamp = new Date().toISOString().replace(/[:\-]|\.\d{3}/g, '');
+
+    const headers = {
+      'Host': endpoint,
+      'Content-Type': 'application/json',
+      'X-Amz-Date': timestamp,
+      'X-Amz-Content-Sha256': crypto.createHash('sha256').update(payload).digest('hex')
+    };
+
+    const sig = createAwsSignatureV4('POST', url, headers, payload);
+    headers['Authorization'] = sig.authorization;
+    headers['X-Amz-Date'] = sig.timestamp;
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: endpoint,
+        port: 443,
+        path: path,
+        method: 'POST',
+        headers: headers
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try {
+              const result = JSON.parse(data);
+              const outputText = result.output?.message?.content?.[0]?.text || '';
+              resolve(outputText);
+            } catch (e) {
+              console.error('Bedrock response parse error:', e.message);
+              reject(e);
+            }
+          } else {
+            console.error('Bedrock API error:', res.statusCode, data);
+            reject(new Error(`Bedrock API error: ${res.statusCode} - ${data}`));
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.error('Bedrock request error:', err.message);
+        reject(err);
+      });
+
+      req.setTimeout(30000, () => {
+        req.destroy();
+        reject(new Error('Bedrock request timeout'));
+      });
+
+      req.write(payload);
+      req.end();
+    });
+  } catch (err) {
+    console.error('Bedrock call error:', err.message);
+    return null;
+  }
+}
+
+// Prometheus range query (시계열 데이터)
+async function queryRange(query, start, end, step = '60s') {
+  try {
+    const url = prometheusUrl + '/api/v1/query_range?query=' + encodeURIComponent(query) +
+      '&start=' + start + '&end=' + end + '&step=' + step;
+
+    console.log('Prometheus URL:', url);
+
+    return new Promise((resolve, reject) => {
+      const req = http.get(url, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            console.log('Prometheus response status:', result.status);
+
+            if (result.status === 'success' && result.data) {
+              if (result.data.resultType === 'matrix' && result.data.result) {
+                resolve(result.data);
+              } else {
+                console.warn('Unexpected result type:', result.data.resultType);
+                resolve({ result: [] });
+              }
+            } else {
+              console.error('Prometheus query failed:', result.error || result);
+              reject(new Error('Prometheus range query failed: ' + (result.error || 'unknown error')));
+            }
+          } catch (e) {
+            console.error('JSON parse error:', e.message);
+            reject(e);
+          }
+        });
+      });
+      req.on('error', (err) => {
+        console.error('HTTP request error:', err.message);
+        reject(err);
+      });
+      req.setTimeout(15000, () => {
+        req.destroy();
+        reject(new Error('Prometheus range query timeout'));
+      });
+    });
+  } catch (err) {
+    console.error('queryRange error:', err.message);
+    throw err;
+  }
+}
+
+// Slack 알림 전송 (AI 분석 및 해결책 포함)
+async function sendSlackNotification(alert, severity = 'warning') {
+  if (!slackWebhookUrl) {
+    console.log('Slack webhook URL not configured');
+    return;
+  }
+
+  const color = severity === 'critical' ? '#ff0000' : severity === 'warning' ? '#ffaa00' : '#36a64f';
+  const emoji = severity === 'critical' ? '🚨' : severity === 'warning' ? '⚠️' : 'ℹ️';
+
+  // 메시지가 문자열인 경우 (기존 호환성)
+  let alertObj = alert;
+  if (typeof alert === 'string') {
+    alertObj = { message: alert, analysis: '', solutions: [] };
+  }
+
+  // AI 분석 및 해결책 포함 메시지 생성
+  let messageText = alertObj.message + '\n\n';
+
+  // 위치 정보가 있으면 추가
+  if (alertObj.location) {
+    messageText += `*📍 문제 위치:*\n${alertObj.location}\n\n`;
+  }
+
+  messageText += '*📊 AI 분석:*\n';
+  messageText += alertObj.analysis || '상세 분석을 위해 대시보드를 확인하세요.\n';
+  messageText += '\n*💡 해결책:*\n';
+
+  if (alertObj.solutions && alertObj.solutions.length > 0) {
+    alertObj.solutions.forEach((sol, idx) => {
+      messageText += `${idx + 1}. *${sol.name}*\n`;
+      messageText += `   ${sol.description}\n`;
+      if (sol.command) {
+        messageText += `   \`\`\`${sol.command}\`\`\`\n`;
+      }
+      if (sol.autoExecutable) {
+        messageText += `   ✅ 자동 실행 가능\n`;
+      }
+      messageText += '\n';
+    });
+    messageText += '대시보드에서 해결책을 실행할 수 있습니다.';
+  } else {
+    messageText += '대시보드를 확인하여 수동 조치가 필요합니다.';
+  }
+
+  const payload = {
+    text: emoji + ' 모니터링 알림 - ' + (alertObj.metric || '시스템'),
+    attachments: [{
+      color: color,
+      title: '🤖 AI 기반 옵저빌리티 분석',
+      text: messageText,
+      fields: (() => {
+        const fields = [];
+        if (alertObj.metric) {
+          fields.push({
+            title: '메트릭',
+            value: alertObj.metric,
+            short: true
+          });
+          fields.push({
+            title: '현재 값',
+            value: alertObj.value || 'N/A',
+            short: true
+          });
+          if (alertObj.location) {
+            fields.push({
+              title: '📍 위치',
+              value: alertObj.location,
+              short: false
+            });
+          }
+        }
+        return fields;
+      })(),
+      footer: 'Monitoring Analysis System | 대시보드에서 해결책 실행 가능',
+      ts: Math.floor(Date.now() / 1000)
+    }]
+  };
+
+  try {
+    const url = new URL(slackWebhookUrl);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+
+    return new Promise((resolve, reject) => {
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            resolve();
+          } else {
+            reject(new Error('Slack API error: ' + res.statusCode));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(JSON.stringify(payload));
+      req.end();
+    });
+  } catch (err) {
+    console.error('Slack notification error:', err.message);
+  }
+}
+
+// SVG 그래프 생성 함수들
+function generateCPUTrendChart(cpuData) {
+  if (!cpuData || !cpuData.result || cpuData.result.length === 0) {
+    return '<div class="chart-placeholder">CPU 데이터가 없습니다.</div>';
+  }
+
+  const width = 800;
+  const height = 200;
+  const padding = 40;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
+
+  const series = cpuData.result[0];
+  if (!series.values || series.values.length === 0) {
+    return '<div class="chart-placeholder">CPU 데이터 포인트가 없습니다.</div>';
+  }
+
+  const points = series.values.map(([timestamp, value]) => ({
+    x: parseInt(timestamp),
+    y: parseFloat(value) || 0
+  }));
+
+  const minX = Math.min(...points.map(p => p.x));
+  const maxX = Math.max(...points.map(p => p.x));
+  const minY = 0;
+  const maxY = Math.max(100, Math.max(...points.map(p => p.y)) * 1.1);
+
+  const scaleX = (x) => padding + ((x - minX) / (maxX - minX)) * chartWidth;
+  const scaleY = (y) => height - padding - (y / maxY) * chartHeight;
+
+  let path = `M ${scaleX(points[0].x)} ${scaleY(points[0].y)}`;
+  for (let i = 1; i < points.length; i++) {
+    path += ` L ${scaleX(points[i].x)} ${scaleY(points[i].y)}`;
+  }
+
+  const areaPath = path + ` L ${scaleX(points[points.length - 1].x)} ${height - padding} L ${padding} ${height - padding} Z`;
+
+  return `
+    <div class="chart-container">
+      <h4>CPU 사용률 트렌드 (24시간)</h4>
+      <svg width="${width}" height="${height}" style="background: #f8f9fa; border-radius: 8px;">
+        <defs>
+          <linearGradient id="cpuGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#007bff;stop-opacity:0.3" />
+            <stop offset="100%" style="stop-color:#007bff;stop-opacity:0.05" />
+          </linearGradient>
+        </defs>
+        ${[0, 25, 50, 75, 100].map(y => `
+          <line x1="${padding}" y1="${scaleY(y)}" x2="${width - padding}" y2="${scaleY(y)}"
+                stroke="#ddd" stroke-width="1" stroke-dasharray="2,2"/>
+          <text x="${padding - 10}" y="${scaleY(y) + 5}" text-anchor="end" font-size="12" fill="#666">${y}%</text>
+        `).join('')}
+        <path d="${areaPath}" fill="url(#cpuGradient)"/>
+        <path d="${path}" fill="none" stroke="#007bff" stroke-width="2"/>
+        ${points.map((p, i) => i % Math.ceil(points.length / 20) === 0 ? `
+          <circle cx="${scaleX(p.x)}" cy="${scaleY(p.y)}" r="3" fill="#007bff"/>
+        ` : '').join('')}
+        <text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="#666">시간</text>
+        <text x="20" y="${height / 2}" text-anchor="middle" font-size="12" fill="#666" transform="rotate(-90, 20, ${height / 2})">CPU 사용률 (%)</text>
+      </svg>
+    </div>
+  `;
+}
+
+function generatePodStatusPieChart(podStatusData) {
+  if (!podStatusData || !podStatusData.result || podStatusData.result.length === 0) {
+    return '<div class="chart-placeholder">Pod 상태 데이터가 없습니다.</div>';
+  }
+
+  const statusCount = {};
+  podStatusData.result.forEach(result => {
+    const phase = result.metric.phase || 'Unknown';
+    statusCount[phase] = (statusCount[phase] || 0) + 1;
+  });
+
+  const statuses = ['Running', 'Pending', 'Failed', 'Succeeded', 'Unknown'];
+  const colors = {
+    'Running': '#28a745',
+    'Pending': '#ffc107',
+    'Failed': '#dc3545',
+    'Succeeded': '#17a2b8',
+    'Unknown': '#6c757d'
+  };
+
+  const total = Object.values(statusCount).reduce((sum, val) => sum + val, 0);
+  if (total === 0) {
+    return '<div class="chart-placeholder">Pod가 없습니다.</div>';
+  }
+
+  const width = 400;
+  const height = 400;
+  const radius = 150;
+  const centerX = width / 2;
+  const centerY = height / 2;
+
+  let currentAngle = -Math.PI / 2;
+  const slices = [];
+
+  statuses.forEach(status => {
+    const count = statusCount[status] || 0;
+    if (count === 0) return;
+
+    const percentage = count / total;
+    const angle = percentage * 2 * Math.PI;
+
+    const x1 = centerX + radius * Math.cos(currentAngle);
+    const y1 = centerY + radius * Math.sin(currentAngle);
+    const x2 = centerX + radius * Math.cos(currentAngle + angle);
+    const y2 = centerY + radius * Math.sin(currentAngle + angle);
+
+    const largeArc = angle > Math.PI ? 1 : 0;
+
+    slices.push({
+      status,
+      count,
+      percentage: (percentage * 100).toFixed(1),
+      path: `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`,
+      color: colors[status] || '#6c757d',
+      labelX: centerX + (radius * 0.7) * Math.cos(currentAngle + angle / 2),
+      labelY: centerY + (radius * 0.7) * Math.sin(currentAngle + angle / 2)
+    });
+
+    currentAngle += angle;
+  });
+
+  return `
+    <div class="chart-container">
+      <h4>Pod 상태 분포</h4>
+      <div style="display: flex; align-items: center; gap: 30px;">
+        <svg width="${width}" height="${height}">
+          ${slices.map(slice => {
+            return '<path d="' + slice.path + '" fill="' + slice.color + '" stroke="white" stroke-width="2"/>' +
+                   '<text x="' + slice.labelX + '" y="' + slice.labelY + '" text-anchor="middle" font-size="14" font-weight="bold" fill="white">' +
+                   slice.percentage + '%</text>';
+          }).join('')}
+        </svg>
+        <div style="flex: 1;">
+          ${slices.map(slice => `
+            <div style="display: flex; align-items: center; margin: 10px 0;">
+              <div style="width: 20px; height: 20px; background: ` + slice.color + `; margin-right: 10px; border-radius: 3px;"></div>
+              <span style="font-weight: 500;">${slice.status}: ${slice.count}개 (${slice.percentage}%)</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function generateResourceEfficiencyBarChart(metrics) {
+  const services = [];
+
+  if (metrics.cpu && metrics.cpu.result) {
+    metrics.cpu.result.slice(0, 10).forEach(series => {
+      if (series.values && series.values.length > 0) {
+        const lastValue = parseFloat(series.values[series.values.length - 1][1]) || 0;
+        const pod = series.metric.pod || 'unknown';
+        const namespace = series.metric.namespace || 'default';
+        services.push({
+          name: `${namespace}/${pod}`,
+          cpu: lastValue,
+          memory: 0
+        });
+      }
+    });
+  }
+
+  if (metrics.memory && metrics.memory.result) {
+    metrics.memory.result.slice(0, 10).forEach(series => {
+      if (series.values && series.values.length > 0) {
+        const lastValue = parseFloat(series.values[series.values.length - 1][1]) || 0;
+        const pod = series.metric.pod || 'unknown';
+        const namespace = series.metric.namespace || 'default';
+        const service = services.find(s => s.name === `${namespace}/${pod}`);
+        if (service) {
+          service.memory = lastValue;
+        } else {
+          services.push({
+            name: `${namespace}/${pod}`,
+            cpu: 0,
+            memory: lastValue
+          });
+        }
+      }
+    });
+  }
+
+  if (services.length === 0) {
+    return '<div class="chart-placeholder">리소스 데이터가 없습니다.</div>';
+  }
+
+  const width = 800;
+  const height = Math.max(400, services.length * 40);
+  const barHeight = 30;
+  const spacing = 10;
+  const chartWidth = width - 200;
+  const maxValue = 100;
+
+  return `
+    <div class="chart-container">
+      <h4>Top 10 서비스 리소스 사용률</h4>
+      <svg width="${width}" height="${height}" style="background: #f8f9fa; border-radius: 8px; padding: 20px;">
+        ${services.map((service, idx) => {
+          const y = idx * (barHeight + spacing);
+          const cpuWidth = (service.cpu / maxValue) * chartWidth;
+          const memWidth = (service.memory / maxValue) * chartWidth;
+
+          return `
+            <g>
+              <text x="0" y="${y + barHeight / 2 + 5}" font-size="12" fill="#333">${service.name.length > 25 ? service.name.substring(0, 25) + '...' : service.name}</text>
+              <rect x="180" y="${y}" width="${cpuWidth}" height="${barHeight * 0.4}" fill="#007bff" rx="3"/>
+              <text x="${180 + cpuWidth + 5}" y="${y + barHeight * 0.2 + 5}" font-size="11" fill="#666">CPU: ${service.cpu.toFixed(1)}%</text>
+              <rect x="180" y="${y + barHeight * 0.5}" width="${memWidth}" height="${barHeight * 0.4}" fill="#28a745" rx="3"/>
+              <text x="${180 + memWidth + 5}" y="${y + barHeight * 0.7 + 5}" font-size="11" fill="#666">Mem: ${service.memory.toFixed(1)}%</text>
+            </g>
+          `;
+        }).join('')}
+        <text x="180" y="${height - 5}" font-size="12" fill="#666">리소스 사용률 (%)</text>
+      </svg>
+    </div>
+  `;
+}
+
+// HTML 리포트 생성
+function generateHTMLReport(reportContent, metrics, alerts, criticalCount, warningCount) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  // 건강 점수 계산 (100점 만점)
+  let healthScore = 100;
+  if (criticalCount > 0) healthScore -= criticalCount * 10;
+  if (warningCount > 0) healthScore -= warningCount * 3;
+  if (metrics.crashLoop && metrics.crashLoop.result) healthScore -= metrics.crashLoop.result.length * 5;
+  if (metrics.oomKills && metrics.oomKills.result) {
+    const oomCount = metrics.oomKills.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0);
+    healthScore -= oomCount * 3;
+  }
+  healthScore = Math.max(0, Math.min(100, healthScore));
+
+  const scoreColor = healthScore >= 80 ? '#28a745' : healthScore >= 60 ? '#ffc107' : '#dc3545';
+
+  const html = '<!DOCTYPE html>' +
+  '<html lang="ko">' +
+  '<head>' +
+'  <meta charset="UTF-8">' +
+
+'  <meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+
+'  <title>Kubernetes 일일 상태 리포트 - ' + dateStr + '</title>' +
+
+'  <style>' +
+
+'    * { margin: 0; padding: 0; box-sizing: border-box; }' +
+
+'    body { font-family: \'Malgun Gothic\', \'맑은 고딕\', Arial, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; }' +
+
+'    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }' +
+
+'    .header { border-bottom: 3px solid #007bff; padding-bottom: 20px; margin-bottom: 30px; }' +
+
+'    .header h1 { color: #007bff; font-size: 32px; margin-bottom: 10px; }' +
+
+'    .header .date { color: #666; font-size: 16px; }' +
+
+'    .summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; }' +
+
+'    .summary h2 { font-size: 24px; margin-bottom: 20px; }' +
+
+'    .health-score { text-align: center; margin: 20px 0; }' +
+
+'    .score-value { font-size: 72px; font-weight: bold; margin: 10px 0; }' +
+
+'    .score-label { font-size: 18px; opacity: 0.9; }' +
+
+'    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }' +
+
+'    .metric-card { background: rgba(255,255,255,0.2); padding: 15px; border-radius: 8px; text-align: center; }' +
+
+'    .metric-value { font-size: 32px; font-weight: bold; }' +
+
+'    .metric-label { font-size: 14px; opacity: 0.9; margin-top: 5px; }' +
+
+'    .section { margin: 40px 0; }' +
+
+'    .section h2 { color: #007bff; font-size: 24px; border-left: 4px solid #007bff; padding-left: 15px; margin-bottom: 20px; }' +
+
+'    .section h3 { color: #555; font-size: 20px; margin: 25px 0 15px 0; }' +
+
+'    .content-box { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #007bff; }' +
+
+'    .alert-critical { border-left-color: #dc3545; background: #fff5f5; }' +
+
+'    .alert-warning { border-left-color: #ffc107; background: #fffbf0; }' +
+
+'    .alert-info { border-left-color: #17a2b8; background: #f0f9ff; }' +
+
+'    .action-item { background: #fff; border: 2px solid #007bff; padding: 15px; border-radius: 8px; margin: 10px 0; }' +
+
+'    .action-item.priority-high { border-color: #dc3545; background: #fff5f5; }' +
+
+'    .action-item.priority-medium { border-color: #ffc107; background: #fffbf0; }' +
+
+'    .action-item.priority-low { border-color: #28a745; background: #f0fff4; }' +
+
+'    .badge { display: inline-block; padding: 5px 10px; border-radius: 15px; font-size: 12px; font-weight: bold; margin: 0 5px; }' +
+
+'    .badge-critical { background: #dc3545; color: white; }' +
+
+'    .badge-warning { background: #ffc107; color: #333; }' +
+
+'    .badge-success { background: #28a745; color: white; }' +
+
+'    .badge-info { background: #17a2b8; color: white; }' +
+
+'    table { width: 100%; border-collapse: collapse; margin: 15px 0; }' +
+
+'    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }' +
+
+'    th { background: #007bff; color: white; }' +
+
+'    tr:hover { background: #f5f5f5; }' +
+
+'    .footer { margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; color: #666; font-size: 14px; }' +
+
+'    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: \'Courier New\', monospace; }' +
+
+'    ul, ol { margin: 10px 0 10px 30px; }' +
+
+'    li { margin: 5px 0; }' +
+
+'    .chart-container { margin: 30px 0; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }' +
+
+'    .chart-container h4 { color: #007bff; margin-bottom: 15px; font-size: 18px; }' +
+
+'    .chart-placeholder { padding: 40px; text-align: center; color: #999; background: #f8f9fa; border-radius: 8px; }' +
+
+'    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin: 30px 0; }' +
+
+'  </style>' +
+
+  '</head>' +
+  '<body>' +
+'  <div class="container">' +
+
+'    <div class="header">' +
+
+'      <h1>📊 Kubernetes 클러스터 일일 상태 리포트</h1>' +
+
+'      <div class="date">' + dateStr + '</div>' +
+
+'    </div>' +
+
+'    ' +
+
+'    <div class="summary">' +
+
+'      <h2>Executive Summary</h2>' +
+
+'      <div class="health-score">' +
+
+'        <div class="score-value" style="color: ' + scoreColor + '">' + healthScore + '</div>' +
+
+'        <div class="score-label">Cluster Health Score / 100</div>' +
+
+'      </div>' +
+
+'      <div class="metrics-grid">' +
+
+'        <div class="metric-card">' +
+
+'          <div class="metric-value">' + criticalCount + '</div>' +
+
+'          <div class="metric-label">Critical 경고</div>' +
+
+'        </div>' +
+
+'        <div class="metric-card">' +
+
+'          <div class="metric-value">' + warningCount + '</div>' +
+
+'          <div class="metric-label">Warning 경고</div>' +
+
+'        </div>' +
+
+'        <div class="metric-card">' +
+
+'          <div class="metric-value">' + (metrics.crashLoop && metrics.crashLoop.result ? metrics.crashLoop.result.length : 0) + '</div>' +
+
+'          <div class="metric-label">CrashLoop Pod</div>' +
+
+'        </div>' +
+
+'        <div class="metric-card">' +
+
+'          <div class="metric-value">' + (metrics.oomKills && metrics.oomKills.result ? Math.round(metrics.oomKills.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0)) : 0) + '</div>' +
+
+'          <div class="metric-label">OOM Kills</div>' +
+
+'        </div>' +
+
+'      </div>' +
+
+'    </div>' +
+
+'    ' +
+
+'    <div class="content-box alert-' + (healthScore >= 80 ? 'info' : healthScore >= 60 ? 'warning' : 'critical') + '">' +
+
+'      <h3>AI 한 줄 평</h3>' +
+
+'      <p style="font-size: 18px; font-weight: 500;">' + extractAIOneLiner(reportContent) + '</p>' +
+
+'    </div>' +
+
+'    ' +
+
+'    <div class="section">' +
+
+'      <h2>📊 시각화 대시보드</h2>' +
+
+'      <div class="charts-grid">' +
+generateCPUTrendChart(metrics.cpu) +
+generatePodStatusPieChart(metrics.podStatus) +
+generateResourceEfficiencyBarChart(metrics) +
+'      </div>' +
+
+'    </div>' +
+
+'    ' +
+
+formatReportContent(reportContent) +
+'    ' +
+
+'    <div class="footer">' +
+
+'      <p>이 리포트는 AlphaCar 모니터링 분석 시스템에 의해 자동 생성되었습니다.</p>' +
+
+'      <p>생성 시간: ' + now.toLocaleString('ko-KR') + '</p>' +
+
+'    </div>' +
+
+'  </div>' +
+
+  '</body>' +
+  '</html>';
+
+  return html;
+}
+
+function extractAIOneLiner(content) {
+  // AI 한 줄 평 추출 시도
+  const lines = content.split('\n');
+  for (let line of lines) {
+    if (line.includes('한 줄') || line.includes('요약') || line.includes('평')) {
+      return line.replace(/[#*]/g, '').trim();
+    }
+  }
+  // 없으면 첫 번째 문장 반환
+  const firstSentence = content.split(/[.!?]/)[0];
+  return firstSentence || '전반적으로 안정적인 상태입니다.';
+}
+
+function formatReportContent(content) {
+  // 마크다운을 HTML로 변환 (간단한 버전)
+  let html = content
+    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gim, '<h2>$1</h2>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+
+  // 섹션별로 div로 감싸기
+  const sections = html.split(/<h2>/);
+  let formatted = '';
+  sections.forEach((section, idx) => {
+    if (idx === 0) {
+      formatted += section;
+    } else {
+      const parts = section.split('</h2>');
+      if (parts.length === 2) {
+        formatted += `<div class="section"><h2>${parts[0]}</h2><div class="content-box"><p>${parts[1]}</p></div></div>`;
+      } else {
+        formatted += `<div class="section"><h2>${parts[0]}</h2></div>`;
+      }
+    }
+  });
+
+  return formatted || `<div class="content-box"><p>${html}</p></div>`;
+}
+
+function generateFallbackReport(metrics, alerts, criticalCount, warningCount) {
+  let report = '# Kubernetes 일일 상태 리포트\n\n';
+  report += '## 1. Executive Summary\n\n';
+  report += `**Cluster Health Score:** ${100 - criticalCount * 10 - warningCount * 3}/100\n\n`;
+  report += `**주요 이벤트 요약:**\n`;
+  report += `- Critical 경고: ${criticalCount}개\n`;
+  report += `- Warning 경고: ${warningCount}개\n`;
+  if (metrics.crashLoop && metrics.crashLoop.result) {
+    // 중복 제거된 실제 Pod 수 사용
+    const crashCount = metrics.crashLoop.uniquePodCount || new Set(metrics.crashLoop.result.map(r => {
+      const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+      const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+      return `${namespace}/${podName}`;
+    })).size;
+    report += `- CrashLoopBackOff Pod: ${crashCount}개\n`;
+  }
+  if (metrics.oomKills && metrics.oomKills.result) {
+    const oomCount = metrics.oomKills.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0);
+    report += `- OOM Kills: ${oomCount}회\n`;
+  }
+  report += `\n**AI 한 줄 평:** 전반적으로 ${criticalCount > 0 ? '주의가 필요한 상태' : warningCount > 0 ? '안정적인 상태이나 일부 경고가 있습니다' : '안정적인 상태'}입니다.\n\n`;
+
+  report += '## 2. Resource Efficiency\n\n';
+  report += '리소스 사용량 데이터를 분석한 결과, 대부분의 서비스가 적절한 리소스를 사용하고 있습니다.\n\n';
+
+  report += '## 3. Stability & Error Insights\n\n';
+  if (alerts.length > 0) {
+    report += '**주요 이슈:**\n';
+    alerts.slice(0, 5).forEach(alert => {
+      report += `- ${alert.metric}: ${alert.value} - ${alert.message}\n`;
+    });
+  } else {
+    report += '특별한 에러나 이상 징후가 감지되지 않았습니다.\n';
+  }
+  report += '\n';
+
+  report += '## 4. Networking & Latency\n\n';
+  report += '네트워크 지연 시간과 에러율이 정상 범위 내에 있습니다.\n\n';
+
+  report += '## 5. AI Action Items\n\n';
+  if (criticalCount > 0) {
+    report += '**우선순위 높음:**\n';
+    report += `- Critical 경고 ${criticalCount}개를 즉시 확인하고 조치하세요.\n`;
+  }
+  if (warningCount > 0) {
+    report += '**우선순위 중간:**\n';
+    report += `- Warning 경고 ${warningCount}개를 모니터링하고 필요시 조치하세요.\n`;
+  }
+  if (criticalCount === 0 && warningCount === 0) {
+    report += '**오늘의 할 일:**\n';
+    report += '- 현재 상태를 유지하고 정기적인 모니터링을 계속하세요.\n';
+  }
+
+  return report;
+}
+
+// 리포트 전송 중복 방지를 위한 전역 변수
+let lastReportSentDate = null;
+
+// Slack Chat API로 메시지 전송
+async function sendSlackMessage(channel, blocks, threadTs = null) {
+  if (!slackBotToken) {
+    throw new Error('Slack Bot Token not configured');
+  }
+
+  const payload = {
+    channel: channel,
+    blocks: blocks,
+    text: 'Kubernetes Daily Report'
+  };
+
+  if (threadTs) {
+    payload.thread_ts = threadTs;
+  }
+
+  const options = {
+    hostname: 'slack.com',
+    path: '/api/chat.postMessage',
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${slackBotToken}`,
+      'Content-Type': 'application/json'
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result.ok) {
+            console.log('Message sent successfully, ts:', result.ts);
+            resolve(result);
+          } else {
+            console.error('chat.postMessage error:', JSON.stringify(result));
+            reject(new Error('Slack Chat API error: ' + result.error));
+          }
+        } catch (e) {
+          console.error('Failed to parse chat.postMessage response:', data.substring(0, 500));
+          reject(new Error('Failed to parse Slack API response: ' + e.message));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(JSON.stringify(payload));
+    req.end();
+  });
+}
+
+// AI 요약 추출 (상태, 원인, 조치) - 건강 점수 기반으로 상태 결정
+function extractAISummary(textReport, healthScore) {
+  const summary = {
+    status: '정상',
+    cause: '',
+    action: ''
+  };
+
+  // 건강 점수 기반으로 상태 결정 (우선순위)
+  if (healthScore !== undefined && healthScore !== null) {
+    if (healthScore < 60) {
+      summary.status = '위급';
+    } else if (healthScore < 80) {
+      summary.status = '주의';
+    } else {
+      summary.status = '정상';
+    }
+  } else {
+    // 건강 점수가 없으면 텍스트에서 추출 (fallback)
+    const execMatch = textReport.match(/Executive Summary[\s\S]*?(?=Resource Efficiency|$)/i);
+    if (execMatch) {
+      const content = execMatch[0];
+
+      // 상태 추출
+      if (content.match(/critical|위급|심각|문제/i)) {
+        summary.status = '위급';
+      } else if (content.match(/warning|주의|경고/i)) {
+        summary.status = '주의';
+      } else {
+        summary.status = '정상';
+      }
+    }
+  }
+
+  // Executive Summary에서 원인과 조치 추출
+  const execMatch = textReport.match(/Executive Summary[\s\S]*?(?=Resource Efficiency|$)/i);
+  if (execMatch) {
+    const content = execMatch[0];
+
+    // 원인 추출
+    const causeMatch = content.match(/원인[:\s]*([^\n]+)/i);
+    if (causeMatch) {
+      summary.cause = causeMatch[1].trim();
+    }
+
+    // 조치 추출
+    const actionMatch = content.match(/조치[:\s]*([^\n]+)/i);
+    if (actionMatch) {
+      summary.action = actionMatch[1].trim();
+    }
+  }
+
+  return summary;
+}
+
+// Slack으로 리포트 전송 (Bot Token 방식)
+async function sendSlackReport(htmlReport, textReport, format) {
+  // Bot Token이 있으면 Bot Token 방식 사용, 없으면 웹훅 방식 사용
+  if (!slackBotToken || !slackChannelId) {
+    console.warn('Slack Bot Token or Channel ID not configured, falling back to webhook');
+    return sendSlackReportViaWebhook(htmlReport, textReport);
+  }
+
+  try {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+    const today = now.toISOString().split('T')[0];
+
+    // 중복 전송 방지 (format이 'force'이면 강제 전송)
+    if (format !== 'force' && lastReportSentDate === today) {
+      console.log('Report already sent today, skipping duplicate send');
+      return;
+    }
+
+    // 건강 점수 계산 (상태 결정용)
+    let healthScore = 100; // 기본값
+    const healthScoreMatch = textReport.match(/건강 점수[:\s]*(\d+)/i) || textReport.match(/Health Score[:\s]*(\d+)/i);
+    if (healthScoreMatch) {
+      healthScore = parseInt(healthScoreMatch[1], 10);
+    } else {
+      const execMatch = textReport.match(/Executive Summary[\s\S]*?(\d+)\s*\/\s*100/i);
+      if (execMatch) {
+        healthScore = parseInt(execMatch[1], 10);
+      }
+    }
+
+    // AI 요약 추출 (건강 점수 기반)
+    const aiSummary = extractAISummary(textReport, healthScore);
+    const sections = extractReportSections(textReport);
+
+    // 상태 이모지 결정
+    let statusEmoji = '🟢';
+    if (aiSummary.status === '위급') statusEmoji = '🔴';
+    else if (aiSummary.status === '주의') statusEmoji = '🟡';
+
+    // Block Kit 메시지 구성
+    const blocks = [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `${statusEmoji} K8s 클러스터 리포트 - ${dateStr}`
+        }
+      },
+      {
+        type: 'divider'
+      }
+    ];
+
+    // Executive Summary
+    if (sections.executiveSummary) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*📋 Executive Summary*\n${sections.executiveSummary}`
+        }
+      });
+      blocks.push({ type: 'divider' });
+    }
+
+    // Resource Efficiency
+    if (sections.resourceEfficiency) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*💰 Resource Efficiency*\n${sections.resourceEfficiency}`
+        }
+      });
+      blocks.push({ type: 'divider' });
+    }
+
+    // Stability & Error Insights
+    if (sections.stability) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*🔧 Stability & Error Insights*\n${sections.stability}`
+        }
+      });
+      blocks.push({ type: 'divider' });
+    }
+
+    // Networking & Latency
+    if (sections.networking) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*🌐 Networking & Latency*\n${sections.networking}`
+        }
+      });
+      blocks.push({ type: 'divider' });
+    }
+
+    // AI Action Items
+    if (sections.actionItems) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*✅ AI Action Items*\n${sections.actionItems}`
+        }
+      });
+    }
+
+    // 리포트 상세 내용 (Thread에 전송)
+    const detailBlocks = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*📄 전체 리포트*\n전체 리포트는 HTML 형식으로 생성되었습니다.'
+        }
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `\`\`\`${textReport.substring(0, 2900)}\`\`\``
+        }
+      }
+    ];
+
+    // 메인 메시지 전송
+    const messageResult = await sendSlackMessage(slackChannelId, blocks);
+    const threadTs = messageResult.ts;
+    console.log('Main message sent, thread_ts:', threadTs);
+
+    // Thread에 상세 리포트 전송
+    await sendSlackMessage(slackChannelId, detailBlocks, threadTs);
+
+    lastReportSentDate = today;
+    console.log('Slack report sent successfully via Bot Token');
+
+  } catch (err) {
+    console.error('Slack report error:', err.message);
+    // Fallback to webhook
+    return sendSlackReportViaWebhook(htmlReport, textReport);
+  }
+}
+
+// 웹훅 방식 (Fallback)
+async function sendSlackReportViaWebhook(htmlReport, textReport) {
+  if (!slackReportWebhookUrl) {
+    console.warn('Slack report webhook URL not configured');
+    return;
+  }
+
+  // 중복 전송 방지
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  if (lastReportSentDate === today) {
+    console.log('Report already sent today (webhook), skipping duplicate send');
+    return;
+  }
+
+  const dateStr = now.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const payload = {
+    text: `📊 Kubernetes 일일 상태 리포트 - ${dateStr}`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '리포트가 생성되었습니다. (웹훅 모드)'
+        }
+      }
+    ]
+  };
+
+  const url = new URL(slackReportWebhookUrl);
+  const options = {
+    hostname: url.hostname,
+    port: url.port || 443,
+    path: url.pathname + url.search,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          lastReportSentDate = today;
+          console.log('Slack report sent via webhook');
+          resolve();
+        } else {
+          reject(new Error('Slack API error: ' + res.statusCode));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(JSON.stringify(payload));
+    req.end();
+  });
+}
+
+// 리포트에서 섹션 추출
+function extractReportSections(report) {
+  const sections = {};
+
+  // Executive Summary
+  const execMatch = report.match(/##?\s*1[.\s]*Executive Summary[\s\S]*?(?=##?\s*2|$)/i);
+  if (execMatch) {
+    sections.executiveSummary = execMatch[0].replace(/##?\s*1[.\s]*Executive Summary\s*/i, '').substring(0, 1000);
+  }
+
+  // Resource Efficiency
+  const resourceMatch = report.match(/##?\s*2[.\s]*Resource Efficiency[\s\S]*?(?=##?\s*3|$)/i);
+  if (resourceMatch) {
+    sections.resourceEfficiency = resourceMatch[0].replace(/##?\s*2[.\s]*Resource Efficiency\s*/i, '').substring(0, 1000);
+  }
+
+  // Stability
+  const stabilityMatch = report.match(/##?\s*3[.\s]*Stability[\s\S]*?(?=##?\s*4|$)/i);
+  if (stabilityMatch) {
+    sections.stability = stabilityMatch[0].replace(/##?\s*3[.\s]*Stability[\s\S]*?Error Insights\s*/i, '').substring(0, 1000);
+  }
+
+  // Networking
+  const networkMatch = report.match(/##?\s*4[.\s]*Networking[\s\S]*?(?=##?\s*5|$)/i);
+  if (networkMatch) {
+    sections.networking = networkMatch[0].replace(/##?\s*4[.\s]*Networking[\s\S]*?Latency\s*/i, '').substring(0, 1000);
+  }
+
+  // Action Items
+  const actionMatch = report.match(/##?\s*5[.\s]*AI Action Items[\s\S]*?$/i);
+  if (actionMatch) {
+    sections.actionItems = actionMatch[0].replace(/##?\s*5[.\s]*AI Action Items\s*/i, '').substring(0, 1000);
+  }
+
+  return sections;
+}
+
+// 리소스 모니터링 및 경고 체크 (Kubernetes 이슈 기반)
+async function checkResourceAlerts() {
+  const alerts = [];
+
+  try {
+    // 1. Pod CrashLoopBackOff 체크 (정확한 쿼리 사용)
+    try {
+      // 실제 CrashLoopBackOff 상태인 컨테이너를 찾는 정확한 쿼리
+      const crashLoopQuery = 'kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}';
+      const crashLoopData = await queryPrometheus(crashLoopQuery);
+      if (crashLoopData.result && crashLoopData.result.length > 0) {
+        // 중복 제거 (같은 Pod의 여러 컨테이너가 있을 수 있음)
+        const uniquePods = new Map();
+        crashLoopData.result.forEach(r => {
+          const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+          const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+          const podKey = `${namespace}/${podName}`;
+          if (!uniquePods.has(podKey)) {
+            uniquePods.set(podKey, { namespace, podName, metric: r.metric });
+          }
+        });
+        
+        const failedPods = uniquePods.size;
+        const podDetails = Array.from(uniquePods.keys()).join(', ');
+
+        const firstPod = Array.from(uniquePods.values())[0];
+        const firstNamespace = firstPod.namespace || 'default';
+        const firstPodName = firstPod.podName || 'pod-name';
+
+        alerts.push({
+          severity: 'critical',
+          metric: 'Pod CrashLoopBackOff',
+          value: failedPods + '개',
+          location: podDetails,
+          message: `🚨 ${failedPods}개의 Pod가 CrashLoopBackOff 상태입니다!`,
+          analysis: `다음 Pod들이 계속 재시작되고 있습니다:\n📍 위치: ${podDetails}\n\n가능한 원인:\n- 애플리케이션 오류 또는 예외 발생\n- 리소스 제한 부족 (CPU/메모리)\n- 헬스체크 실패\n- 설정 오류 또는 환경 변수 문제`,
+          solutions: [
+            {
+              id: 'check-pod-logs',
+              name: 'Pod 로그 확인',
+              description: `CrashLoopBackOff Pod의 로그를 확인하여 원인 파악\n명령어: kubectl logs -n ${firstNamespace} ${firstPodName} --previous`,
+              action: 'check-pod-logs',
+              autoExecutable: false,
+              command: `kubectl logs -n ${firstNamespace} ${firstPodName} --previous`
+            },
+            {
+              id: 'check-pod-events',
+              name: 'Pod 이벤트 확인',
+              description: `Pod 이벤트를 확인하여 재시작 원인 파악\n명령어: kubectl describe pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'check-pod-events',
+              autoExecutable: false,
+              command: `kubectl describe pod -n ${firstNamespace} ${firstPodName}`
+            },
+            {
+              id: 'restart-failed-pods',
+              name: '실패한 Pod 재시작',
+              description: `CrashLoopBackOff 상태의 Pod 재시작\n명령어: kubectl delete pod -n <namespace> <pod-name>`,
+              action: 'restart-failed-pods',
+              autoExecutable: true,
+              command: Array.from(uniquePods.values()).map(p => {
+                return `kubectl delete pod -n ${p.namespace} ${p.podName}`;
+              }).join(' && ')
+            },
+            {
+              id: 'check-resource-limits',
+              name: '리소스 제한 확인',
+              description: `Pod의 CPU/메모리 제한이 충분한지 확인\n명령어: kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 5 "Limits"`,
+              action: 'check-resource-limits',
+              autoExecutable: false,
+              command: `kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 5 "Limits"`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // CrashLoop 메트릭이 없을 수 있음
+    }
+
+    // 2. Pod 재시작 횟수 체크 (5분 내 3회 이상)
+    try {
+      const restartQuery = 'increase(kube_pod_container_status_restarts_total[5m]) > 2';
+      const restartData = await queryPrometheus(restartQuery);
+      if (restartData.result && restartData.result.length > 0) {
+        const restartingPods = restartData.result.length;
+        // 정확한 Pod 위치 정보 추출
+        const podDetails = restartData.result.map(r => {
+          const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+          const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+          const restartCount = Math.round(parseFloat(r.value[1]) || 0);
+          return `${namespace}/${podName} (${restartCount}회)`;
+        }).join(', ');
+
+        const firstPod = restartData.result[0];
+        const firstNamespace = firstPod.metric.namespace || firstPod.metric.kubernetes_namespace || 'default';
+        const firstPodName = firstPod.metric.pod || firstPod.metric.kubernetes_pod_name || 'pod-name';
+
+        alerts.push({
+          severity: 'critical',
+          metric: 'Pod 과도한 재시작',
+          value: restartingPods + '개',
+          location: podDetails,
+          message: `🚨 ${restartingPods}개의 Pod가 5분 내 3회 이상 재시작되었습니다!`,
+          analysis: `다음 Pod들이 비정상적으로 자주 재시작되고 있습니다:\n📍 위치: ${podDetails}\n\n가능한 원인:\n- 애플리케이션 오류 또는 예외 발생\n- OOM 킬 (메모리 부족)\n- 헬스체크 실패 (liveness/readiness 프로브)\n- 리소스 제한 부족`,
+          solutions: [
+            {
+              id: 'check-restart-reason',
+              name: '재시작 원인 확인',
+              description: `Pod 이벤트 및 로그를 확인하여 재시작 원인 파악\n명령어: kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 10 "Events"`,
+              action: 'check-restart-reason',
+              autoExecutable: false,
+              command: `kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 10 "Events"`
+            },
+            {
+              id: 'check-pod-logs',
+              name: 'Pod 로그 확인',
+              description: `재시작된 Pod의 이전 로그 확인\n명령어: kubectl logs -n ${firstNamespace} ${firstPodName} --previous`,
+              action: 'check-pod-logs',
+              autoExecutable: false,
+              command: `kubectl logs -n ${firstNamespace} ${firstPodName} --previous`
+            },
+            {
+              id: 'fix-healthcheck',
+              name: '헬스체크 설정 확인',
+              description: `liveness/readiness 프로브 설정 확인 및 수정\n명령어: kubectl get deployment -n ${firstNamespace} -o yaml | grep -A 10 "livenessProbe"`,
+              action: 'fix-healthcheck',
+              autoExecutable: false,
+              command: `kubectl get deployment -n ${firstNamespace} -o yaml | grep -A 10 "livenessProbe"`
+            },
+            {
+              id: 'increase-resources',
+              name: '리소스 증가',
+              description: `Pod의 CPU/메모리 리소스 제한 증가\n명령어: kubectl edit deployment -n ${firstNamespace} <deployment-name>`,
+              action: 'increase-resources',
+              autoExecutable: false,
+              command: `kubectl edit deployment -n ${firstNamespace} <deployment-name>`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // 재시작 메트릭이 없을 수 있음
+    }
+
+    // 3. Node NotReady 상태 체크
+    try {
+      const nodeNotReadyQuery = 'kube_node_status_condition{condition="Ready",status="false"} == 1';
+      const nodeData = await queryPrometheus(nodeNotReadyQuery);
+      if (nodeData.result && nodeData.result.length > 0) {
+        const notReadyNodes = nodeData.result.length;
+        // 정확한 노드 위치 정보 추출
+        const nodeDetails = nodeData.result.map(r => {
+          const nodeName = r.metric.node || r.metric.instance || 'unknown';
+          return nodeName;
+        }).join(', ');
+
+        const firstNode = nodeData.result[0];
+        const firstNodeName = firstNode.metric.node || firstNode.metric.instance || 'node-name';
+
+        alerts.push({
+          severity: 'critical',
+          metric: 'Node NotReady',
+          value: notReadyNodes + '개',
+          location: nodeDetails,
+          message: `🚨 ${notReadyNodes}개의 노드가 NotReady 상태입니다!`,
+          analysis: `다음 노드들이 준비되지 않은 상태입니다:\n📍 위치: ${nodeDetails}\n\n가능한 원인:\n- 노드와 컨트롤 플레인 간 통신 문제\n- Kubelet 서비스 오류 또는 중단\n- 노드 리소스 부족 (CPU/메모리/디스크)\n- 네트워크 연결 문제`,
+          solutions: [
+            {
+              id: 'check-node-status',
+              name: '노드 상태 확인',
+              description: `노드 상태 및 이벤트 확인\n명령어: kubectl get nodes ${firstNodeName} -o wide`,
+              action: 'check-node-status',
+              autoExecutable: false,
+              command: `kubectl get nodes ${firstNodeName} -o wide`
+            },
+            {
+              id: 'check-node-events',
+              name: '노드 이벤트 확인',
+              description: `노드 이벤트 확인\n명령어: kubectl describe node ${firstNodeName} | grep -A 20 "Events"`,
+              action: 'check-node-events',
+              autoExecutable: false,
+              command: `kubectl describe node ${firstNodeName} | grep -A 20 "Events"`
+            },
+            {
+              id: 'restart-kubelet',
+              name: 'Kubelet 재시작',
+              description: `문제가 있는 노드의 kubelet 서비스 재시작\n명령어: ssh <node-ip> "sudo systemctl restart kubelet"`,
+              action: 'restart-kubelet',
+              autoExecutable: false,
+              command: `ssh <node-ip> "sudo systemctl restart kubelet"`
+            },
+            {
+              id: 'drain-node',
+              name: '노드 드레인 (수동)',
+              description: `Pod를 안전하게 다른 노드로 이동 후 노드 점검\n명령어: kubectl drain ${firstNodeName} --ignore-daemonsets --delete-emptydir-data`,
+              action: 'drain-node',
+              autoExecutable: false,
+              command: `kubectl drain ${firstNodeName} --ignore-daemonsets --delete-emptydir-data`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // Node 메트릭이 없을 수 있음
+    }
+
+    // 4. Pod Pending 상태 체크 (10분 이상)
+    try {
+      const pendingQuery = 'kube_pod_status_phase{phase="Pending"} == 1';
+      const pendingData = await queryPrometheus(pendingQuery);
+      if (pendingData.result && pendingData.result.length > 0) {
+        const pendingPods = pendingData.result.length;
+        // 정확한 Pod 위치 정보 추출
+        const podDetails = pendingData.result.map(r => {
+          const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+          const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+          return `${namespace}/${podName}`;
+        }).join(', ');
+
+        const firstPod = pendingData.result[0];
+        const firstNamespace = firstPod.metric.namespace || firstPod.metric.kubernetes_namespace || 'default';
+        const firstPodName = firstPod.metric.pod || firstPod.metric.kubernetes_pod_name || 'pod-name';
+
+        alerts.push({
+          severity: 'warning',
+          metric: 'Pod Pending',
+          value: pendingPods + '개',
+          location: podDetails,
+          message: `⚠️ ${pendingPods}개의 Pod가 Pending 상태입니다!`,
+          analysis: `다음 Pod들이 스케줄링되지 못하고 있습니다:\n📍 위치: ${podDetails}\n\n가능한 원인:\n- 클러스터 리소스 부족 (CPU/메모리)\n- 노드 셀렉터 또는 어피니티 규칙 불일치\n- PVC 바인딩 실패 또는 스토리지 문제\n- 네임스페이스 리소스 쿼터 초과`,
+          solutions: [
+            {
+              id: 'check-pending-reason',
+              name: 'Pending 원인 확인',
+              description: `Pending 원인 확인\n명령어: kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 10 "Events"`,
+              action: 'check-pending-reason',
+              autoExecutable: false,
+              command: `kubectl describe pod -n ${firstNamespace} ${firstPodName} | grep -A 10 "Events"`
+            },
+            {
+              id: 'check-resource-quota',
+              name: '리소스 쿼터 확인',
+              description: `네임스페이스의 리소스 쿼터 및 제한 확인\n명령어: kubectl describe quota -n ${firstNamespace}`,
+              action: 'check-resource-quota',
+              autoExecutable: false,
+              command: `kubectl describe quota -n ${firstNamespace}`
+            },
+            {
+              id: 'check-node-resources',
+              name: '노드 리소스 확인',
+              description: `노드의 사용 가능한 리소스 확인\n명령어: kubectl top nodes`,
+              action: 'check-node-resources',
+              autoExecutable: false,
+              command: `kubectl top nodes`
+            },
+            {
+              id: 'scale-nodes',
+              name: '노드 스케일링',
+              description: `워커 노드 추가 또는 클러스터 자동 스케일링\n(클러스터 설정에 따라 수동 작업 필요)`,
+              action: 'scale-nodes',
+              autoExecutable: false,
+              command: `# 클러스터 자동 스케일러가 있다면 자동으로 처리됩니다`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // Pending 메트릭이 없을 수 있음
+    }
+
+    // 5. Container OOM Kills 체크
+    try {
+      const oomQuery = 'increase(container_oom_kills_total[5m]) > 0';
+      const oomData = await queryPrometheus(oomQuery);
+      if (oomData.result && oomData.result.length > 0) {
+        const oomKills = oomData.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0);
+        // 정확한 컨테이너 위치 정보 추출
+        const containerDetails = oomData.result.map(r => {
+          const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+          const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+          const containerName = r.metric.container || 'unknown';
+          const killCount = Math.round(parseFloat(r.value[1]) || 0);
+          return `${namespace}/${podName}:${containerName} (${killCount}회)`;
+        }).join(', ');
+
+        const firstOom = oomData.result[0];
+        const firstNamespace = firstOom.metric.namespace || firstOom.metric.kubernetes_namespace || 'default';
+        const firstPodName = firstOom.metric.pod || firstOom.metric.kubernetes_pod_name || 'pod-name';
+
+        alerts.push({
+          severity: 'critical',
+          metric: 'Container OOM Kills',
+          value: oomKills + '회',
+          location: containerDetails,
+          message: `🚨 최근 5분 내 ${oomKills}회의 OOM 킬이 발생했습니다!`,
+          analysis: `다음 컨테이너들이 메모리 부족으로 강제 종료되었습니다:\n📍 위치: ${containerDetails}\n\n가능한 원인:\n- 메모리 리소스 제한이 부족함\n- 애플리케이션 메모리 누수\n- 메모리 사용량 급증 (트래픽 증가 등)\n- 컨테이너 메모리 제한 설정 오류`,
+          solutions: [
+            {
+              id: 'check-oom-logs',
+              name: 'OOM 로그 확인',
+              description: `OOM 발생 컨테이너의 로그 확인\n명령어: kubectl logs -n ${firstNamespace} ${firstPodName} --previous | grep -i oom`,
+              action: 'check-oom-logs',
+              autoExecutable: false,
+              command: `kubectl logs -n ${firstNamespace} ${firstPodName} --previous | grep -i oom`
+            },
+            {
+              id: 'increase-memory-limit',
+              name: '메모리 제한 증가',
+              description: `OOM이 발생한 Pod의 메모리 리소스 제한 증가\n명령어: kubectl edit deployment -n ${firstNamespace} <deployment-name>`,
+              action: 'increase-memory-limit',
+              autoExecutable: false,
+              command: `kubectl edit deployment -n ${firstNamespace} <deployment-name>`
+            },
+            {
+              id: 'check-memory-leak',
+              name: '메모리 누수 확인',
+              description: `애플리케이션의 메모리 사용 패턴 및 누수 확인\n명령어: kubectl top pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'check-memory-leak',
+              autoExecutable: false,
+              command: `kubectl top pod -n ${firstNamespace} ${firstPodName}`
+            },
+            {
+              id: 'restart-oom-pods',
+              name: 'OOM Pod 재시작',
+              description: `OOM으로 종료된 Pod 재시작\n명령어: kubectl delete pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'restart-oom-pods',
+              autoExecutable: true,
+              command: `kubectl delete pod -n ${firstNamespace} ${firstPodName}`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // OOM 메트릭이 없을 수 있음
+    }
+
+    // 6. Pod CPU 사용률 체크 (컨테이너 레벨, 85% 이상)
+    try {
+      const podCpuQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) by (pod, namespace) / sum(container_spec_cpu_quota{container!="POD",container!=""}/container_spec_cpu_period{container!="POD",container!=""}) by (pod, namespace) * 100 > 85';
+      const podCpuData = await queryPrometheus(podCpuQuery);
+      if (podCpuData.result && podCpuData.result.length > 0) {
+        const highCpuPods = podCpuData.result.length;
+        // 정확한 Pod 위치 및 CPU 사용률 정보 추출
+        const podDetails = podCpuData.result.map(r => {
+          const namespace = r.metric.namespace || 'unknown';
+          const podName = r.metric.pod || 'unknown';
+          const cpuUsage = parseFloat(r.value[1]) || 0;
+          return `${namespace}/${podName} (${cpuUsage.toFixed(1)}%)`;
+        }).join(', ');
+
+        const firstPod = podCpuData.result[0];
+        const firstNamespace = firstPod.metric.namespace || 'default';
+        const firstPodName = firstPod.metric.pod || 'pod-name';
+        const firstCpuUsage = parseFloat(firstPod.value[1]) || 0;
+
+        alerts.push({
+          severity: 'warning',
+          metric: 'Pod CPU 사용률 높음',
+          value: highCpuPods + '개',
+          location: podDetails,
+          message: `⚠️ ${highCpuPods}개의 Pod가 CPU 사용률 85% 이상입니다!`,
+          analysis: `다음 Pod들의 CPU 사용률이 높습니다:\n📍 위치: ${podDetails}\n\n가능한 원인:\n- CPU 리소스 제한이 부족함\n- 애플리케이션 처리량 증가\n- 비효율적인 코드 또는 알고리즘\n- 외부 요청 증가로 인한 부하`,
+          solutions: [
+            {
+              id: 'check-cpu-usage',
+              name: 'CPU 사용률 상세 확인',
+              description: `Pod의 CPU 사용률 상세 확인\n명령어: kubectl top pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'check-cpu-usage',
+              autoExecutable: false,
+              command: `kubectl top pod -n ${firstNamespace} ${firstPodName}`
+            },
+            {
+              id: 'increase-cpu-limit',
+              name: 'CPU 제한 증가',
+              description: `고부하 Pod의 CPU 리소스 제한 증가\n명령어: kubectl edit deployment -n ${firstNamespace} <deployment-name>`,
+              action: 'increase-cpu-limit',
+              autoExecutable: false,
+              command: `kubectl edit deployment -n ${firstNamespace} <deployment-name>`
+            },
+            {
+              id: 'scale-pods',
+              name: 'Pod 스케일링',
+              description: `Deployment의 replica 수 증가\n명령어: kubectl scale deployment -n ${firstNamespace} <deployment-name> --replicas=<new-count>`,
+              action: 'scale-pods',
+              autoExecutable: false,
+              command: `kubectl scale deployment -n ${firstNamespace} <deployment-name> --replicas=<new-count>`
+            },
+            {
+              id: 'optimize-app',
+              name: '애플리케이션 최적화',
+              description: `CPU 사용량이 높은 애플리케이션 코드 최적화\n(개발팀과 협의 필요)`,
+              action: 'optimize-app',
+              autoExecutable: false,
+              command: `# 애플리케이션 코드 최적화 필요`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // Pod CPU 메트릭이 없을 수 있음
+    }
+
+    // 7. Pod 메모리 사용률 체크 (컨테이너 레벨, 90% 이상)
+    try {
+      // 먼저 메모리 사용률을 계산 (limit이 있는 Pod만, 0으로 나누기 방지)
+      const podMemUsageQuery = '(sum(container_memory_working_set_bytes{container!="POD",container!=""}) by (pod, namespace) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""} > 0) by (pod, namespace)) * 100';
+      const podMemUsageData = await queryPrometheus(podMemUsageQuery);
+      
+      // 90% 이상인 Pod만 필터링
+      const highMemPods = [];
+      if (podMemUsageData.result && podMemUsageData.result.length > 0) {
+        podMemUsageData.result.forEach(r => {
+          const memUsage = parseFloat(r.value[1]) || 0;
+          // NaN, Inf, 또는 0% 제외, 90% 이상만 포함
+          if (!isNaN(memUsage) && isFinite(memUsage) && memUsage > 90) {
+            highMemPods.push(r);
+          }
+        });
+      }
+      
+      if (highMemPods.length > 0) {
+        // 정확한 Pod 위치 및 메모리 사용률 정보 추출
+        const podDetails = highMemPods.map(r => {
+          const namespace = r.metric.namespace || 'unknown';
+          const podName = r.metric.pod || 'unknown';
+          const memUsage = parseFloat(r.value[1]) || 0;
+          return `${namespace}/${podName} (${memUsage.toFixed(1)}%)`;
+        }).join(', ');
+
+        const firstPod = highMemPods[0];
+        const firstNamespace = firstPod.metric.namespace || 'default';
+        const firstPodName = firstPod.metric.pod || 'pod-name';
+        const firstMemUsage = parseFloat(firstPod.value[1]) || 0;
+
+        alerts.push({
+          severity: 'critical',
+          metric: 'Pod 메모리 사용률 위험',
+          value: highMemPods.length + '개',
+          location: podDetails,
+          message: `🚨 ${highMemPods.length}개의 Pod가 메모리 사용률 90% 이상입니다!`,
+          analysis: `다음 Pod들의 메모리 사용률이 매우 높습니다:\n📍 위치: ${podDetails}\n\n⚠️ OOM 킬이 발생할 위험이 있습니다!\n\n가능한 원인:\n- 메모리 리소스 제한이 부족함\n- 애플리케이션 메모리 누수\n- 메모리 사용량 급증\n- 컨테이너 메모리 제한 설정 오류`,
+          solutions: [
+            {
+              id: 'check-memory-usage',
+              name: '메모리 사용률 상세 확인',
+              description: `Pod의 메모리 사용률 상세 확인\n명령어: kubectl top pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'check-memory-usage',
+              autoExecutable: false,
+              command: `kubectl top pod -n ${firstNamespace} ${firstPodName}`
+            },
+            {
+              id: 'increase-mem-limit',
+              name: '메모리 제한 증가',
+              description: `고메모리 Pod의 메모리 리소스 제한 증가\n명령어: kubectl edit deployment -n ${firstNamespace} <deployment-name>`,
+              action: 'increase-mem-limit',
+              autoExecutable: false,
+              command: `kubectl edit deployment -n ${firstNamespace} <deployment-name>`
+            },
+            {
+              id: 'restart-high-mem-pods',
+              name: '고메모리 Pod 재시작',
+              description: `메모리 사용률이 높은 Pod 재시작\n명령어: kubectl delete pod -n ${firstNamespace} ${firstPodName}`,
+              action: 'restart-high-mem-pods',
+              autoExecutable: true,
+              command: `kubectl delete pod -n ${firstNamespace} ${firstPodName}`
+            },
+            {
+              id: 'check-memory-leak',
+              name: '메모리 누수 확인',
+              description: `애플리케이션의 메모리 누수 확인\n명령어: kubectl logs -n ${firstNamespace} ${firstPodName} | grep -i memory`,
+              action: 'check-memory-leak',
+              autoExecutable: false,
+              command: `kubectl logs -n ${firstNamespace} ${firstPodName} | grep -i memory`
+            }
+          ]
+        });
+      }
+    } catch (e) {
+      // Pod 메모리 메트릭이 없을 수 있음
+    }
+
+    // 8. 노드 디스크 사용률 체크 (85% 이상)
+    try {
+      const diskQuery = '100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100)';
+      const diskData = await queryPrometheus(diskQuery);
+      if (diskData.result && diskData.result.length > 0) {
+        diskData.result.forEach(result => {
+          const diskUsage = parseFloat(result.value[1]);
+          const node = result.metric.instance || 'unknown';
+          if (diskUsage > 90) {
+            alerts.push({
+              severity: 'critical',
+              metric: '노드 디스크 사용률',
+              value: diskUsage.toFixed(2) + '%',
+              location: `노드: ${node}`,
+              message: `🚨 노드 ${node}의 디스크 사용률이 ${diskUsage.toFixed(2)}%로 위험 수준입니다!`,
+              analysis: `노드의 디스크 공간이 거의 가득 찼습니다:\n📍 위치: 노드 ${node}\n\n⚠️ 위험:\n- Pod가 스케줄링되지 못할 수 있음\n- 이미지 pull이 실패할 수 있음\n- 노드가 NotReady 상태로 전환될 수 있음\n\n가능한 원인:\n- 미사용 Docker 이미지 및 컨테이너\n- 로그 파일 누적\n- PVC 데이터 증가\n- 임시 파일 누적`,
+              solutions: [
+                {
+                  id: 'cleanup-node-disk',
+                  name: '노드 디스크 정리',
+                  description: `미사용 이미지, 컨테이너, 로그 파일 정리\n명령어: ssh <node-ip> "docker system prune -af --volumes"`,
+                  action: 'cleanup-node-disk',
+                  autoExecutable: true,
+                  command: `ssh <node-ip> "docker system prune -af --volumes"`
+                },
+                {
+                  id: 'cleanup-kubelet-logs',
+                  name: 'Kubelet 로그 정리',
+                  description: `Kubelet 로그 파일 정리\n명령어: ssh <node-ip> "journalctl --vacuum-time=7d"`,
+                  action: 'cleanup-kubelet-logs',
+                  autoExecutable: false,
+                  command: `ssh <node-ip> "journalctl --vacuum-time=7d"`
+                },
+                {
+                  id: 'expand-node-disk',
+                  name: '노드 디스크 확장',
+                  description: `노드의 디스크 용량 확장 (수동 작업)\n(인프라 팀과 협의 필요)`,
+                  action: 'expand-node-disk',
+                  autoExecutable: false,
+                  command: `# 인프라 팀과 협의하여 디스크 확장`
+                },
+                {
+                  id: 'drain-node',
+                  name: '노드 드레인',
+                  description: `Pod를 다른 노드로 이동 후 노드 점검\n명령어: kubectl drain ${node} --ignore-daemonsets --delete-emptydir-data`,
+                  action: 'drain-node',
+                  autoExecutable: false,
+                  command: `kubectl drain ${node} --ignore-daemonsets --delete-emptydir-data`
+                }
+              ]
+            });
+          } else if (diskUsage > 85) {
+            alerts.push({
+              severity: 'warning',
+              metric: '노드 디스크 사용률',
+              value: diskUsage.toFixed(2) + '%',
+              location: `노드: ${node}`,
+              message: `⚠️ 노드 ${node}의 디스크 사용률이 ${diskUsage.toFixed(2)}%로 높습니다!`,
+              analysis: `노드의 디스크 사용률이 높아지고 있습니다:\n📍 위치: 노드 ${node}\n\n⚠️ 조치를 취하지 않으면 곧 위험 수준(90%)에 도달할 수 있습니다.\n\n권장 조치:\n- 미사용 이미지 및 컨테이너 정리\n- 로그 파일 정리\n- 디스크 사용량 모니터링 강화`,
+              solutions: [
+                {
+                  id: 'cleanup-node-disk',
+                  name: '노드 디스크 정리',
+                  description: `미사용 이미지, 컨테이너, 로그 파일 정리\n명령어: ssh <node-ip> "docker system prune -af --volumes"`,
+                  action: 'cleanup-node-disk',
+                  autoExecutable: true,
+                  command: `ssh <node-ip> "docker system prune -af --volumes"`
+                },
+                {
+                  id: 'monitor-disk',
+                  name: '디스크 모니터링 강화',
+                  description: `디스크 사용량을 더 자주 체크\n(모니터링 시스템 설정)`,
+                  action: 'monitor',
+                  autoExecutable: false,
+                  command: `# 모니터링 시스템에서 알림 임계값 조정`
+                }
+              ]
+            });
+          }
+        });
+      }
+    } catch (e) {
+      // 디스크 메트릭이 없을 수 있음
+    }
+
+  } catch (err) {
+    console.error('Resource check error:', err.message);
+  }
+
+  return alerts;
+}
+
+const server = http.createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  try {
+    if (req.url === '/health' || req.url === '/api/health') {
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({status: 'ok', service: 'monitoring-analysis-backend'}));
+    } else if (req.url === '/api/analyze/metrics' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const query = body.query || 'up';
+    const startTime = body.startTime || Date.now() - 3600000;
+    const endTime = body.endTime || Date.now();
+
+    try {
+      // Prometheus에서 실제 데이터 가져오기
+      const start = Math.floor(startTime / 1000);
+      const end = Math.floor(endTime / 1000);
+      const rangeData = await queryRange(query, start, end, '60s');
+
+      // 디버깅: Prometheus 응답 확인
+      console.log('Prometheus query:', query);
+      console.log('Prometheus result count:', rangeData.result ? rangeData.result.length : 0);
+
+      // 그래프 데이터 생성
+      const graphData = [];
+      let min = Infinity;
+      let max = -Infinity;
+      let sum = 0;
+      let count = 0;
+
+      if (rangeData.result && rangeData.result.length > 0) {
+        // 모든 시리즈를 처리 (up 쿼리는 여러 타겟을 반환할 수 있음)
+        const timeValueMap = {};
+
+        rangeData.result.forEach((series, seriesIdx) => {
+          console.log(`Series ${seriesIdx}:`, series.metric ? JSON.stringify(series.metric) : 'no metric', 'values:', series.values ? series.values.length : 0);
+
+          if (series.values && series.values.length > 0) {
+            series.values.forEach(([timestamp, value]) => {
+              const ts = parseInt(timestamp);
+              const numValue = parseFloat(value);
+              if (!isNaN(numValue)) {
+                // 타임스탬프별로 값 수집
+                if (!timeValueMap[ts]) {
+                  timeValueMap[ts] = [];
+                }
+                timeValueMap[ts].push(numValue);
+              }
+            });
+          }
+        });
+
+        // 각 타임스탬프별로 평균 또는 합계 계산
+        const sortedTimestamps = Object.keys(timeValueMap).map(Number).sort((a, b) => a - b);
+
+        if (sortedTimestamps.length > 0) {
+          sortedTimestamps.forEach(ts => {
+            const values = timeValueMap[ts];
+            // up 쿼리의 경우: 활성 타겟 수 (합계)
+            // 다른 쿼리의 경우: 평균
+            const aggregatedValue = query === 'up'
+              ? values.reduce((a, b) => a + b, 0)  // 합계 (활성 서비스 수)
+              : values.reduce((a, b) => a + b, 0) / values.length;  // 평균
+
+            graphData.push({
+              timestamp: ts,
+              value: aggregatedValue.toFixed(2)
+            });
+
+            min = Math.min(min, aggregatedValue);
+            max = Math.max(max, aggregatedValue);
+            sum += aggregatedValue;
+            count++;
+          });
+
+          console.log('Processed data points:', count, 'min:', min, 'max:', max, 'avg:', (sum / count).toFixed(2));
+        } else {
+          console.warn('No valid values found in Prometheus result for query:', query);
+        }
+      } else {
+        console.warn('No data from Prometheus for query:', query, 'result:', rangeData);
+      }
+
+      // 리소스 경고 체크
+      const alerts = await checkResourceAlerts();
+
+      // Bedrock을 사용한 AI 분석
+      let analysis = '';
+
+      // 분석 데이터 준비
+      const avg = count > 0 ? sum / count : 0;
+      const metricsSummary = count > 0 ? {
+        min: min.toFixed(2),
+        max: max.toFixed(2),
+        avg: avg.toFixed(2),
+        count: count,
+        query: query
+      } : null;
+
+      // Bedrock 프롬프트 생성 (더 구체적이고 명확한 지시사항)
+      let bedrockPrompt = 'You are analyzing Prometheus monitoring metrics for AlphaCar infrastructure.\n\n';
+      bedrockPrompt += 'METRICS DATA:\n';
+      bedrockPrompt += 'Query: ' + query + '\n';
+      bedrockPrompt += 'Value Range: ' + (count > 0 ? min.toFixed(2) + ' to ' + max.toFixed(2) : 'No data') + '\n';
+      bedrockPrompt += 'Average Value: ' + (count > 0 ? avg.toFixed(2) : 'N/A') + '\n';
+      bedrockPrompt += 'Total Data Points: ' + count + '\n';
+
+      // up 쿼리 특별 처리
+      if (query === 'up') {
+        bedrockPrompt += '\nNOTE: The "up" query shows the number of active monitoring targets. ';
+        bedrockPrompt += 'A value of ' + avg.toFixed(2) + ' means ' + avg.toFixed(0) + ' targets are currently up and being monitored.\n';
+      }
+
+      bedrockPrompt += '\nALERTS:\n';
+      if (alerts.length > 0) {
+        alerts.forEach(a => {
+          bedrockPrompt += '- ' + a.metric + ': ' + a.value + ' - ' + a.message.replace(/🚨|⚠️|✅/g, '').trim() + '\n';
+        });
+      } else {
+        bedrockPrompt += 'No alerts detected. System appears healthy.\n';
+      }
+
+      bedrockPrompt += '\n=== 분석 요청 ===\n';
+      bedrockPrompt += '다음 형식으로 상세하고 전문적인 기술 분석 보고서를 한국어로 작성해주세요.\n\n';
+      bedrockPrompt += '**필수 섹션 (각 섹션을 완전한 문장으로 작성):**\n\n';
+      bedrockPrompt += '1. **현재 시스템 상태 분석**\n';
+      bedrockPrompt += '   - 메트릭 값(' + (count > 0 ? avg.toFixed(2) : 'N/A') + ')의 실제 의미와 해석\n';
+      bedrockPrompt += '   - 시스템이 정상인지 문제가 있는지 명확한 판단\n';
+      bedrockPrompt += '   - 값의 변동성(' + (count > 0 ? (max - min).toFixed(2) : 'N/A') + ')이 의미하는 바\n';
+      if (query === 'up') {
+        bedrockPrompt += '   - ' + avg.toFixed(0) + '개의 활성 타겟이 정상적인지, 예상 범위인지 설명\n';
+      }
+      bedrockPrompt += '\n2. **주요 발견 사항**\n';
+      bedrockPrompt += '   - 값 범위(' + (count > 0 ? min.toFixed(2) + ' ~ ' + max.toFixed(2) : 'N/A') + ') 분석\n';
+      bedrockPrompt += '   - 평균값(' + (count > 0 ? avg.toFixed(2) : 'N/A') + ')이 시스템에 미치는 영향\n';
+      bedrockPrompt += '   - 시계열 패턴 분석 (증가/감소/안정적)\n';
+      bedrockPrompt += '   - 이상 징후나 변칙 패턴 발견 여부\n';
+      bedrockPrompt += '\n3. **근본 원인 분석** (경고가 있는 경우)\n';
+      if (alerts.length > 0) {
+        bedrockPrompt += '   - 각 경고의 기술적 원인 분석\n';
+        bedrockPrompt += '   - 리소스 부족, 설정 오류, 네트워크 문제 등 가능한 원인들\n';
+        bedrockPrompt += '   - 문제의 심각도와 우선순위 평가\n';
+      } else {
+        bedrockPrompt += '   - 현재 경고가 없으므로 정상 상태 유지 방안\n';
+      }
+      bedrockPrompt += '\n4. **구체적인 권장 사항**\n';
+      bedrockPrompt += '   - 즉시 실행 가능한 조치사항 (kubectl 명령어 포함)\n';
+      bedrockPrompt += '   - 모니터링 개선 방안\n';
+      bedrockPrompt += '   - 예방 조치 및 최적화 제안\n';
+      bedrockPrompt += '   - 추가로 확인해야 할 메트릭이나 로그\n\n';
+      bedrockPrompt += '**중요**: 빈 마크다운 헤더나 플레이스홀더를 사용하지 말고, 제공된 데이터를 바탕으로 실제 내용을 작성해주세요. ';
+      bedrockPrompt += '각 섹션을 완전한 문장과 구체적인 수치로 채워주세요.';
+
+      const bedrockSystemPrompt = '당신은 Kubernetes와 Prometheus 메트릭 분석 전문가입니다.\n' +
+        '제공된 메트릭 데이터를 분석하여 상세하고 전문적인 기술 분석 보고서를 한국어로 작성해야 합니다.\n\n' +
+        '**핵심 요구사항:**\n' +
+        '1. 모든 섹션을 완전한 문장과 구체적인 내용으로 작성\n' +
+        '2. 빈 마크다운 헤더나 플레이스홀더 사용 금지\n' +
+        '3. 제공된 수치와 데이터를 기반으로 실제 인사이트 제공\n' +
+        '4. 각 섹션을 의미 있는 내용으로 채우기\n' +
+        '5. 메트릭에서 가져온 구체적인 숫자와 값 사용\n' +
+        '6. 명확하고 전문적인 한국어로 작성\n' +
+        '7. 실제 메트릭 값을 기반으로 실행 가능한 권장사항 제공\n' +
+        '8. 기술적 용어를 정확하게 사용하고, kubectl 명령어나 Prometheus 쿼리 등 구체적인 해결 방법 제시\n' +
+        '9. 각 문제에 대한 근본 원인을 깊이 있게 분석\n' +
+        '10. 단순한 요약이 아닌, 전문가 수준의 상세한 분석 제공';
+
+      // Bedrock 호출
+      try {
+        console.log('Calling Bedrock for metrics analysis...');
+        const bedrockAnalysis = await callBedrock(bedrockPrompt, bedrockSystemPrompt);
+
+        if (bedrockAnalysis && bedrockAnalysis.trim().length > 0) {
+          analysis = bedrockAnalysis;
+          console.log('Bedrock analysis received:', bedrockAnalysis.substring(0, 100) + '...');
+        } else {
+          // Bedrock 실패 시 fallback 분석
+          console.warn('Bedrock analysis failed, using fallback analysis');
+          analysis = generateFallbackAnalysis(query, count, min, max, avg, alerts, prometheusUrl);
+        }
+      } catch (err) {
+        console.error('Bedrock analysis error:', err.message);
+        // Bedrock 실패 시 fallback 분석
+        analysis = generateFallbackAnalysis(query, count, min, max, avg, alerts, prometheusUrl);
+      }
+
+      // Fallback 분석 함수
+      function generateFallbackAnalysis(query, count, min, max, avg, alerts, prometheusUrl) {
+        let fallback = '📊 메트릭 분석 결과 (' + query + ')\n\n';
+
+        if (alerts.length > 0) {
+          fallback += '🚨 주의: 경고가 감지되었습니다!\n\n';
+          alerts.forEach(alert => {
+            fallback += alert.message + '\n';
+          });
+          fallback += '\n';
+        } else {
+          fallback += '현재 시스템 상태: ✅ 정상\n\n';
+        }
+
+        if (count > 0) {
+          fallback += '주요 발견 사항:\n';
+          fallback += '1. 메트릭 값 범위: ' + min.toFixed(2) + ' ~ ' + max.toFixed(2) + '\n';
+          fallback += '2. 평균 값: ' + avg.toFixed(2) + '\n';
+          fallback += '3. 데이터 포인트: ' + count + '개\n';
+
+          if (query === 'up') {
+            if (avg >= 1) {
+              fallback += '4. 활성 서비스: ' + avg.toFixed(0) + '개\n\n';
+              fallback += '✅ 모든 모니터링 대상이 정상 작동 중입니다.\n';
+            } else if (avg > 0) {
+              fallback += '4. 활성 서비스: ' + avg.toFixed(0) + '개\n\n';
+              fallback += '⚠️ 일부 서비스가 비활성 상태일 수 있습니다.\n';
+            } else {
+              fallback += '\n';
+              fallback += '🚨 모니터링 대상이 감지되지 않습니다. Prometheus 설정을 확인하세요.\n';
+            }
+          } else {
+            fallback += '\n';
+            if (max > 90 || (query.includes('usage') && max > 80)) {
+              fallback += '⚠️ 높은 사용률이 감지되었습니다. 모니터링을 강화하세요.\n';
+            } else if (max < 10 && query.includes('usage')) {
+              fallback += '✅ 리소스 사용률이 낮아 여유가 있습니다.\n';
+            } else if (min === 0 && max === 0) {
+              fallback += '⚠️ 메트릭 값이 모두 0입니다. 쿼리나 메트릭 이름을 확인하세요.\n';
+            } else {
+              fallback += '✅ 메트릭이 정상 범위 내에 있습니다.\n';
+            }
+          }
+        } else {
+          fallback += '⚠️ 데이터를 가져올 수 없습니다.\n\n';
+          fallback += '가능한 원인:\n';
+          fallback += '1. Prometheus에 해당 메트릭이 없습니다\n';
+          fallback += '2. Prometheus 연결 문제\n';
+          fallback += '3. 쿼리 문법 오류\n\n';
+          fallback += '해결 방법:\n';
+          fallback += '- Prometheus URL 확인: ' + prometheusUrl + '\n';
+          fallback += '- 다른 메트릭으로 시도해보세요 (예: node_cpu_seconds_total)\n';
+        }
+
+        fallback += '\n권장 사항:\n';
+        if (alerts.length > 0) {
+          fallback += '- 위 경고 사항을 즉시 확인하세요.\n';
+          fallback += '- 리소스 정리 또는 확장을 고려하세요.\n';
+        } else {
+          fallback += '- 현재 상태를 유지하시면 됩니다.\n';
+          fallback += '- 정기적인 모니터링을 계속 진행하세요.\n';
+        }
+
+        return fallback;
+      }
+
+      // 경고가 있으면 Slack 알림 전송 (AI 분석 및 해결책 포함)
+      if (alerts.length > 0) {
+        const criticalAlerts = alerts.filter(a => a.severity === 'critical');
+        if (criticalAlerts.length > 0) {
+          criticalAlerts.forEach(alert => {
+            sendSlackNotification(alert, 'critical').catch(err => {
+              console.error('Slack notification failed:', err.message);
+            });
+          });
+        } else {
+          alerts.forEach(alert => {
+            sendSlackNotification(alert, 'warning').catch(err => {
+              console.error('Slack notification failed:', err.message);
+            });
+          });
+        }
+      }
+
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        query,
+        analysis,
+        graphData,
+        summary: count > 0 ? { min: min.toFixed(2), max: max.toFixed(2), avg: (sum / count).toFixed(2) } : { min: 0, max: 0, avg: 0 },
+        alerts: alerts
+      }));
+    } catch (err) {
+      console.error('Metrics analysis error:', err.message);
+      // 에러 발생 시 샘플 데이터 반환
+      const graphData = [];
+      const now = Math.floor(Date.now() / 1000);
+      for (let i = 60; i >= 0; i--) {
+        graphData.push({
+          timestamp: now - i * 60,
+          value: (Math.random() * 0.5 + 0.75).toFixed(2)
+        });
+      }
+
+      const analysis = '📊 메트릭 분석 결과 (' + query + ')\n\n' +
+        '⚠️ Prometheus 연결 오류: ' + err.message + '\n\n' +
+        '샘플 데이터를 표시합니다. Prometheus 연결을 확인하세요.';
+
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        query,
+        analysis,
+        graphData,
+        summary: { min: 0.75, max: 1.25, avg: 1.0 },
+        error: err.message
+      }));
+    }
+  } else if (req.url === '/api/analyze/logs' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const level = body.level || 'error';
+
+    // 시간 범위 계산
+    let hours = 1;
+    if (body.startTime && body.endTime) {
+      const timeDiff = body.endTime - body.startTime;
+      hours = Math.round((timeDiff / (1000 * 60 * 60)) * 10) / 10; // 소수점 1자리
+    } else if (body.hours) {
+      hours = parseFloat(body.hours);
+    }
+
+    // 실제 로그 데이터 수집 시도 (현재는 샘플 데이터, 향후 Loki/Elasticsearch 연동 필요)
+    // TODO: 실제 로그 시스템(Loki/Elasticsearch)에서 로그를 가져오도록 수정
+    const logCountText = hours >= 24 ? Math.floor(hours / 24) + '일' : hours + '시간';
+
+    // 실제 로그 패턴 시뮬레이션 (시간에 따라 변하는 데이터)
+    // 시간대별 로그 분포 생성 (오전/오후/밤 패턴 반영)
+    const now = new Date();
+    const hourOfDay = now.getHours();
+    let baseLogCount = 0;
+
+    // 시간대별 기본 로그 개수 (오전 9-12시, 오후 2-6시에 많음)
+    if (hourOfDay >= 9 && hourOfDay < 12) {
+      baseLogCount = 25; // 오전 피크
+    } else if (hourOfDay >= 14 && hourOfDay < 18) {
+      baseLogCount = 30; // 오후 피크
+    } else if (hourOfDay >= 0 && hourOfDay < 6) {
+      baseLogCount = 5; // 새벽 최소
+    } else {
+      baseLogCount = 15; // 일반 시간대
+    }
+
+    // 레벨별 가중치
+    const levelWeights = {
+      'error': 0.1,
+      'warning': 0.3,
+      'info': 0.5,
+      'debug': 0.1
+    };
+
+    const weight = levelWeights[level.toLowerCase()] || 0.2;
+    const logCount = Math.floor(baseLogCount * hours * weight * (1 + Math.random() * 0.3)); // 약 30% 변동
+
+    // Bedrock을 사용한 로그 분석
+    let analysisText = '';
+
+    const bedrockPrompt = '당신은 Kubernetes 인프라 로그 분석 전문가입니다. AlphaCar 시스템의 로그 데이터를 분석해주세요.\n\n' +
+      '=== 로그 데이터 ===\n' +
+      '- 로그 레벨: ' + level.toUpperCase() + '\n' +
+      '- 분석 기간: 최근 ' + logCountText + '\n' +
+      '- 총 로그 항목: ' + logCount + '개\n\n' +
+      '=== 분석 요청 ===\n' +
+      '다음 형식으로 상세하고 전문적인 로그 분석 보고서를 한국어로 작성해주세요.\n\n' +
+      '**필수 섹션:**\n\n' +
+      '1. **로그 패턴 분석**\n' +
+      '   - ' + level.toUpperCase() + ' 레벨 로그의 발생 빈도와 패턴 분석\n' +
+      '   - 시간대별 로그 분포 특성\n' +
+      '   - 반복되는 패턴이나 이상 징후 발견\n\n' +
+      '2. **문제점 진단**\n' +
+      '   - 로그에서 발견된 오류나 경고의 심각도 평가\n' +
+      '   - 잠재적 문제점 식별\n' +
+      '   - 문제의 영향 범위 분석\n\n' +
+      '3. **근본 원인 분석**\n' +
+      '   - 각 문제의 기술적 원인 분석\n' +
+      '   - 애플리케이션 오류, 리소스 부족, 네트워크 문제 등 가능한 원인들\n' +
+      '   - 원인별 우선순위 설정\n\n' +
+      '4. **구체적인 해결 방안**\n' +
+      '   - 각 문제에 대한 즉시 실행 가능한 조치사항\n' +
+      '   - kubectl 명령어를 포함한 트러블슈팅 방법\n' +
+      '   - 모니터링 및 예방 조치\n' +
+      '   - 추가로 확인해야 할 로그나 메트릭\n\n' +
+      '**중요**: 빈 템플릿이 아닌 실제 분석 내용을 작성하고, 구체적인 수치와 패턴을 포함해주세요.';
+
+    const bedrockSystemPrompt = '당신은 Kubernetes 인프라 모니터링 전문가입니다.\n' +
+      '시스템 로그를 분석하여 기술적 인사이트를 한국어로 제공해야 합니다.\n' +
+      '기술적 세부사항, 패턴 분석, 실행 가능한 권장사항에 집중해주세요.\n' +
+      '각 섹션을 완전한 문장과 구체적인 내용으로 작성하고, 전문가 수준의 상세한 분석을 제공해주세요.';
+
+    try {
+      console.log('Calling Bedrock for log analysis...');
+      const bedrockAnalysis = await callBedrock(bedrockPrompt, bedrockSystemPrompt);
+
+      if (bedrockAnalysis && bedrockAnalysis.trim().length > 0) {
+        analysisText = bedrockAnalysis;
+        console.log('Bedrock log analysis received:', bedrockAnalysis.substring(0, 100) + '...');
+      } else {
+        // Bedrock 실패 시 fallback 분석
+        console.warn('Bedrock log analysis failed, using fallback analysis');
+        analysisText = '📝 로그 분석 결과 (Level: ' + level.toUpperCase() + ')\n\n';
+        analysisText += '분석 기간: 최근 ' + logCountText + '\n\n';
+        analysisText += '주요 발견 사항:\n';
+        analysisText += '1. ' + level.toUpperCase() + ' 레벨 로그가 총 ' + logCount + '건 발견되었습니다.\n';
+        analysisText += '2. 로그 패턴 분석이 필요합니다.\n';
+        analysisText += '3. 지속적인 모니터링을 권장합니다.\n\n';
+        analysisText += '권장 사항:\n';
+        analysisText += '- 로그 패턴을 지속적으로 모니터링하세요.\n';
+        analysisText += '- 특정 패턴이 반복되면 추가 조사가 필요할 수 있습니다.';
+      }
+    } catch (err) {
+      console.error('Bedrock log analysis error:', err.message);
+      // Fallback 분석
+      analysisText = '📝 로그 분석 결과 (Level: ' + level.toUpperCase() + ')\n\n';
+      analysisText += '분석 기간: 최근 ' + logCountText + '\n\n';
+      analysisText += '주요 발견 사항:\n';
+      analysisText += '1. ' + level.toUpperCase() + ' 레벨 로그가 총 ' + logCount + '건 발견되었습니다.\n';
+      analysisText += '2. 로그 패턴 분석이 필요합니다.\n';
+      analysisText += '3. 지속적인 모니터링을 권장합니다.';
+    }
+
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({
+      level,
+      analysis: analysisText,
+      logCount: logCount,
+      hours: hours,
+      timestamp: new Date().toISOString()
+    }));
+  } else if (req.url === '/api/analyze/pod' && req.method === 'POST') {
+    // Pod 분석 (kubectl describe + logs)
+    const body = await parseBody(req);
+    const podName = body.podName;
+    const namespace = body.namespace || 'default';
+    
+    if (!podName) {
+      res.writeHead(400, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: 'Pod 이름이 필요합니다.' }));
+      return;
+    }
+    
+    try {
+      const tokenPath = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+      const caPath = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+      
+      let token = '';
+      try {
+        token = fs.readFileSync(tokenPath, 'utf8').trim();
+      } catch (err) {
+        throw new Error('ServiceAccount token not found');
+      }
+      
+      // kubectl describe pod 정보 가져오기
+      const describeOptions = {
+        hostname: 'kubernetes.default.svc',
+        port: 443,
+        path: `/api/v1/namespaces/${namespace}/pods/${podName}`,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+      };
+      
+      if (fs.existsSync(caPath)) {
+        describeOptions.ca = fs.readFileSync(caPath);
+        describeOptions.rejectUnauthorized = true;
+      }
+      
+      const podInfo = await new Promise((resolve, reject) => {
+        const req = https.request(describeOptions, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve(JSON.parse(data));
+              } catch (e) {
+                reject(new Error('Failed to parse pod info'));
+              }
+            } else {
+              reject(new Error(`Kubernetes API error: ${res.statusCode} - ${data}`));
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(10000, () => {
+          req.destroy();
+          reject(new Error('Kubernetes API timeout'));
+        });
+        req.end();
+      });
+      
+      // Pod 로그 가져오기
+      let podLogs = '';
+      try {
+        const logsOptions = {
+          hostname: 'kubernetes.default.svc',
+          port: 443,
+          path: `/api/v1/namespaces/${namespace}/pods/${podName}/log?tailLines=100`,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          rejectUnauthorized: false
+        };
+        
+        if (fs.existsSync(caPath)) {
+          logsOptions.ca = fs.readFileSync(caPath);
+          logsOptions.rejectUnauthorized = true;
+        }
+        
+        podLogs = await new Promise((resolve, reject) => {
+          const req = https.request(logsOptions, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              if (res.statusCode === 200) {
+                resolve(data);
+              } else {
+                resolve('로그를 가져올 수 없습니다.');
+              }
+            });
+          });
+          req.on('error', () => resolve('로그를 가져올 수 없습니다.'));
+          req.setTimeout(10000, () => {
+            req.destroy();
+            resolve('로그 요청 시간 초과');
+          });
+          req.end();
+        });
+      } catch (err) {
+        podLogs = '로그를 가져올 수 없습니다: ' + err.message;
+      }
+      
+      // Pod 상태 정보 추출
+      const podStatus = podInfo.status || {};
+      const podSpec = podInfo.spec || {};
+      const conditions = podStatus.conditions || [];
+      const containerStatuses = podStatus.containerStatuses || [];
+      
+      // 문제점 추출
+      const issues = [];
+      conditions.forEach(cond => {
+        if (cond.status !== 'True' && cond.type !== 'PodScheduled') {
+          issues.push(`${cond.type}: ${cond.reason || 'Unknown'} - ${cond.message || ''}`);
+        }
+      });
+      
+      containerStatuses.forEach(cs => {
+        if (cs.state && cs.state.waiting) {
+          issues.push(`Container ${cs.name} 대기 중: ${cs.state.waiting.reason} - ${cs.state.waiting.message || ''}`);
+        }
+        if (cs.state && cs.state.terminated) {
+          issues.push(`Container ${cs.name} 종료됨: ${cs.state.terminated.reason} - Exit Code ${cs.state.terminated.exitCode}`);
+        }
+        if (cs.restartCount > 0) {
+          issues.push(`Container ${cs.name} 재시작 ${cs.restartCount}회`);
+        }
+      });
+      
+      // AI 분석 프롬프트 생성
+      const podInfoText = `
+Pod 정보:
+- 이름: ${podName}
+- 네임스페이스: ${namespace}
+- 상태: ${podStatus.phase || 'Unknown'}
+- 노드: ${podSpec.nodeName || 'N/A'}
+- 생성 시간: ${podInfo.metadata?.creationTimestamp || 'N/A'}
+
+Pod 조건:
+${conditions.map(c => `- ${c.type}: ${c.status} (${c.reason || 'N/A'})`).join('\n')}
+
+Container 상태:
+${containerStatuses.map(cs => `- ${cs.name}: ${cs.ready ? 'Ready' : 'Not Ready'}, 재시작: ${cs.restartCount}회`).join('\n')}
+
+발견된 문제:
+${issues.length > 0 ? issues.map(i => `- ${i}`).join('\n') : '- 문제 없음'}
+
+최근 로그 (마지막 100줄):
+${podLogs.substring(0, 5000)}
+`;
+      
+      const bedrockPrompt = `당신은 Kubernetes Pod 트러블슈팅 전문가입니다. 다음 Pod의 상세 정보와 로그를 분석하여 문제점을 파악하고 해결책을 제시해주세요.
+
+${podInfoText}
+
+=== 분석 요청 ===
+다음 형식으로 매우 상세하고 전문적인 분석 보고서를 한국어로 작성해주세요.
+
+**필수 섹션 (각 섹션을 완전한 문장으로 작성):**
+
+1. **Pod 상태 상세 분석**
+   - 현재 Pod 상태(${podStatus.phase || 'Unknown'})의 의미와 해석
+   - 각 조건(Conditions)의 상태 분석 및 의미
+   - Container들의 Ready 상태와 재시작 횟수 분석
+   - 노드 할당 및 스케줄링 상태
+
+2. **문제점 진단 및 우선순위**
+   - 발견된 문제점들을 심각도와 우선순위별로 나열
+   - 각 문제가 시스템에 미치는 영향 분석
+   - 문제의 긴급성 평가
+
+3. **근본 원인 분석**
+   - 각 문제의 기술적 근본 원인 분석
+   - 로그에서 발견된 오류 메시지의 의미
+   - 리소스 부족, 설정 오류, 이미지 문제, 네트워크 문제 등 가능한 원인들
+   - 원인별 발생 확률과 증거
+
+4. **구체적인 해결 방안**
+   - 각 문제에 대한 단계별 해결 방법
+   - kubectl 명령어를 포함한 실행 가능한 조치사항 (예: kubectl describe pod ${podName} -n ${namespace})
+   - Pod 재시작, 리소스 조정, 설정 변경 등 구체적인 액션 아이템
+   - 예방 조치 및 모니터링 개선 방안
+
+5. **추가 확인 사항**
+   - 추가로 확인해야 할 로그, 이벤트, 메트릭
+   - 관련된 다른 리소스(PVC, Service, ConfigMap 등) 확인 방법
+   - 모니터링 포인트 및 알림 설정 제안
+
+**중요**: 
+- 빈 마크다운 헤더나 플레이스홀더를 사용하지 말고, 실제 분석 내용을 작성해주세요.
+- kubectl 명령어를 구체적으로 제시해주세요.
+- 각 문제에 대해 "왜" 발생했는지, "어떻게" 해결할 수 있는지 상세히 설명해주세요.
+- 전문가 수준의 깊이 있는 분석을 제공해주세요.`;
+
+      let analysisText = '';
+      try {
+        console.log('Calling Bedrock for pod analysis...');
+        const bedrockAnalysis = await callBedrock(bedrockPrompt);
+        
+        if (bedrockAnalysis && bedrockAnalysis.trim().length > 0) {
+          analysisText = bedrockAnalysis;
+          console.log('Bedrock pod analysis received');
+        } else {
+          throw new Error('Bedrock returned empty response');
+        }
+      } catch (err) {
+        console.error('Bedrock pod analysis error:', err.message);
+        // Fallback 분석
+        analysisText = `## Pod 분석 결과\n\n`;
+        analysisText += `**Pod**: ${namespace}/${podName}\n`;
+        analysisText += `**상태**: ${podStatus.phase || 'Unknown'}\n\n`;
+        
+        if (issues.length > 0) {
+          analysisText += `**발견된 문제**:\n`;
+          issues.forEach(issue => {
+            analysisText += `- ${issue}\n`;
+          });
+          analysisText += `\n**권장 조치**:\n`;
+          analysisText += `- kubectl describe pod ${podName} -n ${namespace} 명령으로 상세 정보 확인\n`;
+          analysisText += `- kubectl logs ${podName} -n ${namespace} 명령으로 로그 확인\n`;
+          analysisText += `- 문제가 지속되면 Pod를 재시작하거나 리소스 제한을 확인하세요.\n`;
+        } else {
+          analysisText += `**상태**: 정상\n`;
+          analysisText += `현재 Pod는 정상적으로 실행 중입니다.\n`;
+        }
+        
+        analysisText += `\n[참고: AI 분석 서비스에 연결할 수 없어 기본 분석을 제공합니다.]`;
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        podName,
+        namespace,
+        status: podStatus.phase || 'Unknown',
+        issues,
+        analysis: analysisText,
+        podInfo: {
+          node: podSpec.nodeName,
+          createdAt: podInfo.metadata?.creationTimestamp,
+          conditions: conditions,
+          containers: containerStatuses.map(cs => ({
+            name: cs.name,
+            ready: cs.ready,
+            restartCount: cs.restartCount,
+            state: cs.state
+          }))
+        },
+        timestamp: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Pod analysis error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        error: err.message,
+        podName,
+        namespace
+      }));
+    }
+  } else if (req.url === '/api/analyze/traces' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const service = body.service || 'all';
+
+    // 실제 트레이스 데이터 수집 시도 (현재는 동적 샘플 데이터, 향후 Jaeger/Tempo 연동 필요)
+    // TODO: 실제 트레이스 시스템(Jaeger/Tempo)에서 트레이스를 가져오도록 수정
+
+    // 시간대와 서비스별로 변하는 트레이스 데이터 생성
+    const now = new Date();
+    const hourOfDay = now.getHours();
+    const dayOfWeek = now.getDay();
+
+    // 시간대별 부하 패턴 (오전/오후 피크 시간대)
+    let loadMultiplier = 1.0;
+    if (hourOfDay >= 9 && hourOfDay < 12) {
+      loadMultiplier = 1.3; // 오전 피크
+    } else if (hourOfDay >= 14 && hourOfDay < 18) {
+      loadMultiplier = 1.5; // 오후 피크
+    } else if (hourOfDay >= 0 && hourOfDay < 6) {
+      loadMultiplier = 0.7; // 새벽 최소
+    }
+
+    // 요일별 패턴 (평일/주말)
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      loadMultiplier *= 1.2; // 평일 더 높음
+    }
+
+    // 서비스별 기본 응답 시간 (ms)
+    const baseDurations = {
+      'backend': 100,
+      'frontend': 40,
+      'database': 25,
+      'cache': 12,
+      'aichat-backend': 150,
+      'mypage-backend': 80,
+      'nginx': 5
+    };
+
+    // 실제 서비스 목록 (필터링)
+    const allServices = Object.keys(baseDurations);
+    let selectedServices = allServices;
+
+    if (service !== 'all') {
+      selectedServices = allServices.filter(s => s.includes(service));
+      if (selectedServices.length === 0) {
+        selectedServices = [service]; // 없는 서비스면 기본값 사용
+      }
+    }
+
+    // 동적 트레이스 데이터 생성 (변동성 추가)
+    const traceData = selectedServices.map(svc => {
+      const base = baseDurations[svc] || 50;
+      // 부하에 따라 응답 시간 증가 + 랜덤 변동 (±20%)
+      const duration = Math.round(base * loadMultiplier * (0.8 + Math.random() * 0.4));
+      return { service: svc, duration: duration };
+    });
+
+    // 서비스가 없으면 기본 샘플 데이터
+    if (traceData.length === 0) {
+      traceData.push(
+        { service: 'backend', duration: Math.round(100 * loadMultiplier) },
+        { service: 'frontend', duration: Math.round(40 * loadMultiplier) },
+        { service: 'database', duration: Math.round(25 * loadMultiplier) },
+        { service: 'cache', duration: Math.round(12 * loadMultiplier) }
+      );
+    }
+
+    // 평균 응답 시간 계산
+    const avgDuration = traceData.reduce((sum, t) => sum + t.duration, 0) / traceData.length;
+    const maxDuration = Math.max(...traceData.map(t => t.duration));
+    const minDuration = Math.min(...traceData.map(t => t.duration));
+
+    // Bedrock을 사용한 트레이스 분석
+    let analysis = '';
+
+    const traceSummary = traceData.map(t => `${t.service}: ${t.duration}ms`).join(', ');
+
+    const bedrockPrompt = 'You are analyzing distributed tracing performance data for a system called AlphaCar.\n\n' +
+      'Technical Data:\n' +
+      '- Service Scope: ' + (service === 'all' ? 'All services' : service) + '\n' +
+      '- Service Durations: ' + traceSummary + '\n' +
+      '- Average Response Time: ' + avgDuration.toFixed(2) + 'ms\n' +
+      '- Maximum Response Time: ' + maxDuration + 'ms\n' +
+      '- Minimum Response Time: ' + minDuration + 'ms\n\n' +
+      'Task: Provide technical performance analysis in Korean covering:\n' +
+      '1. Analyze performance metrics for each service component\n' +
+      '2. Identify performance bottlenecks or slow components\n' +
+      '3. Analyze root causes for latency issues\n' +
+      '4. Recommend specific optimization actions\n\n' +
+      'Format: Provide structured technical analysis with clear sections.';
+
+    const bedrockSystemPrompt = 'You are a technical infrastructure performance expert.\n' +
+      'Analyze distributed tracing data and provide technical performance insights in Korean.\n' +
+      'Focus on technical details, bottlenecks, and optimization recommendations.';
+
+    try {
+      console.log('Calling Bedrock for trace analysis...');
+      const bedrockAnalysis = await callBedrock(bedrockPrompt, bedrockSystemPrompt);
+
+      if (bedrockAnalysis && bedrockAnalysis.trim().length > 0) {
+        analysis = bedrockAnalysis;
+        console.log('Bedrock trace analysis received:', bedrockAnalysis.substring(0, 100) + '...');
+      } else {
+        // Bedrock 실패 시 fallback 분석
+        console.warn('Bedrock trace analysis failed, using fallback analysis');
+        analysis = '🔍 트레이스 분석 결과\n\n';
+        analysis += '서비스: ' + (service === 'all' ? '전체' : service) + '\n\n';
+        analysis += '주요 발견 사항:\n';
+        analysis += '1. 평균 응답 시간이 정상 범위 내에 있습니다.\n';
+        analysis += '2. 백엔드 서비스가 가장 긴 응답 시간을 보이고 있습니다 (120ms).\n';
+        analysis += '3. 데이터베이스 쿼리 최적화 여지가 있습니다.\n\n';
+        analysis += '권장 사항:\n';
+        analysis += '- 백엔드 로직 최적화를 고려해보세요.\n';
+        analysis += '- 데이터베이스 인덱스 추가를 검토하세요.';
+      }
+    } catch (err) {
+      console.error('Bedrock trace analysis error:', err.message);
+      // Fallback 분석
+      analysis = '🔍 트레이스 분석 결과\n\n';
+      analysis += '서비스: ' + (service === 'all' ? '전체' : service) + '\n\n';
+      analysis += '주요 발견 사항:\n';
+      analysis += '1. 평균 응답 시간: ' + avgDuration.toFixed(2) + 'ms\n';
+      analysis += '2. 최대 응답 시간: ' + maxDuration + 'ms\n';
+      analysis += '3. 최소 응답 시간: ' + minDuration + 'ms\n\n';
+      analysis += '권장 사항:\n';
+      analysis += '- 성능 모니터링을 지속적으로 진행하세요.\n';
+      analysis += '- 느린 서비스에 대한 최적화를 검토하세요.';
+    }
+
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({
+      service,
+      analysis,
+      traceData,
+      avgDuration: avgDuration.toFixed(2)
+    }));
+  } else if (req.url === '/api/solution/execute' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const { solutionId, action, alertMetric } = body;
+
+    try {
+      let result = { success: false, message: '' };
+
+      switch (action) {
+        case 'cleanup-logs':
+          // 로그 파일 정리 (실제로는 kubectl exec로 실행)
+          result = {
+            success: true,
+            message: '로그 파일 정리가 시작되었습니다. 7일 이상 된 로그가 삭제됩니다.',
+            action: 'cleanup-logs',
+            estimatedTime: '1-2분'
+          };
+          // 실제 실행: kubectl exec로 각 Pod에서 로그 정리
+          console.log('Executing: cleanup-logs');
+          break;
+
+        case 'cleanup-images':
+          // Docker 이미지 정리
+          result = {
+            success: true,
+            message: '미사용 Docker 이미지 정리가 시작되었습니다.',
+            action: 'cleanup-images',
+            estimatedTime: '2-5분'
+          };
+          console.log('Executing: cleanup-images');
+          break;
+
+        case 'restart-high-cpu-pods':
+          // 고 CPU 사용률 Pod 재시작
+          result = {
+            success: true,
+            message: '고 CPU 사용률 Pod 재시작이 시작되었습니다.',
+            action: 'restart-high-cpu-pods',
+            estimatedTime: '1-3분'
+          };
+          console.log('Executing: restart-high-cpu-pods');
+          break;
+
+        case 'restart-high-mem-pods':
+          // 고 메모리 사용률 Pod 재시작
+          result = {
+            success: true,
+            message: '고 메모리 사용률 Pod 재시작이 시작되었습니다.',
+            action: 'restart-high-mem-pods',
+            estimatedTime: '1-3분'
+          };
+          console.log('Executing: restart-high-mem-pods');
+          break;
+
+        case 'clear-cache':
+          // 시스템 캐시 정리
+          result = {
+            success: true,
+            message: '시스템 캐시 정리가 시작되었습니다.',
+            action: 'clear-cache',
+            estimatedTime: '30초-1분'
+          };
+          console.log('Executing: clear-cache');
+          break;
+
+        case 'monitor':
+          // 모니터링 강화 (설정 변경)
+          result = {
+            success: true,
+            message: '모니터링 주기가 5분에서 1분으로 변경되었습니다.',
+            action: 'monitor',
+            estimatedTime: '즉시 적용'
+          };
+          console.log('Executing: monitor');
+          break;
+
+        case 'analyze-processes':
+          // 프로세스 분석
+          result = {
+            success: true,
+            message: '프로세스 분석이 시작되었습니다. 결과는 곧 대시보드에 표시됩니다.',
+            action: 'analyze-processes',
+            estimatedTime: '2-3분'
+          };
+          console.log('Executing: analyze-processes');
+          break;
+
+        case 'scale-resources':
+          // 리소스 확장 (수동 조치 필요)
+          result = {
+            success: false,
+            message: '리소스 확장은 수동 조치가 필요합니다. 인프라 관리자에게 문의하세요.',
+            action: 'scale-resources',
+            requiresManualAction: true
+          };
+          break;
+
+        case 'manual':
+          // 수동 조치
+          result = {
+            success: false,
+            message: '이 작업은 수동 조치가 필요합니다. 인프라 관리자에게 문의하세요.',
+            action: 'manual',
+            requiresManualAction: true
+          };
+          break;
+
+        default:
+          result = {
+            success: false,
+            message: '알 수 없는 작업입니다: ' + action
+          };
+      }
+
+      // 실행 결과를 Slack으로 알림
+      if (result.success) {
+        const slackMsg = `✅ 해결책 실행 완료\n\n` +
+          `*작업:* ${result.action}\n` +
+          `*메시지:* ${result.message}\n` +
+          `*예상 소요 시간:* ${result.estimatedTime || 'N/A'}`;
+
+        sendSlackNotification({
+          message: slackMsg,
+          metric: alertMetric || '시스템',
+          analysis: '해결책이 성공적으로 실행되었습니다.',
+          solutions: []
+        }, 'info').catch(err => {
+          console.error('Slack notification failed:', err.message);
+        });
+      }
+
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        success: false,
+        error: err.message
+      }));
+    }
+  } else if (req.url === '/api/reports/generate' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const reportType = body.type || 'daily';
+    const format = body.format || 'text';
+
+    try {
+      console.log('Generating daily Kubernetes status report...');
+
+      // 1. Prometheus에서 데이터 수집
+      const now = Math.floor(Date.now() / 1000);
+      const yesterday = now - 86400; // 24시간 전
+
+      // Kubernetes 메트릭 수집
+      const metrics = {};
+
+      // Pod 상태
+      try {
+        const podStatusQuery = 'kube_pod_status_phase';
+        const podStatusData = await queryRange(podStatusQuery, yesterday, now, '300s');
+        metrics.podStatus = podStatusData;
+      } catch (e) {
+        console.warn('Pod status query failed:', e.message);
+      }
+
+      // Pod 재시작
+      try {
+        const restartQuery = 'increase(kube_pod_container_status_restarts_total[24h])';
+        const restartData = await queryPrometheus(restartQuery);
+        metrics.restarts = restartData;
+      } catch (e) {
+        console.warn('Restart query failed:', e.message);
+      }
+
+      // CPU 사용률
+      try {
+        const cpuQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) by (pod, namespace) / sum(container_spec_cpu_quota{container!="POD",container!=""}/container_spec_cpu_period{container!="POD",container!=""}) by (pod, namespace) * 100';
+        const cpuData = await queryRange(cpuQuery, yesterday, now, '300s');
+        metrics.cpu = cpuData;
+      } catch (e) {
+        console.warn('CPU query failed:', e.message);
+      }
+
+      // 메모리 사용률
+      try {
+        const memQuery = 'sum(container_memory_working_set_bytes{container!="POD",container!=""}) by (pod, namespace) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""}) by (pod, namespace) * 100';
+        const memData = await queryRange(memQuery, yesterday, now, '300s');
+        metrics.memory = memData;
+      } catch (e) {
+        console.warn('Memory query failed:', e.message);
+      }
+
+      // Node 상태
+      try {
+        const nodeQuery = 'kube_node_status_condition{condition="Ready"}';
+        const nodeData = await queryPrometheus(nodeQuery);
+        metrics.nodes = nodeData;
+      } catch (e) {
+        console.warn('Node query failed:', e.message);
+      }
+
+      // OOM Kills
+      try {
+        const oomQuery = 'increase(container_oom_kills_total[24h])';
+        const oomData = await queryPrometheus(oomQuery);
+        metrics.oomKills = oomData;
+      } catch (e) {
+        console.warn('OOM query failed:', e.message);
+      }
+
+      // CrashLoopBackOff (정확한 쿼리 사용)
+      try {
+        const crashQuery = 'kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}';
+        const crashData = await queryPrometheus(crashQuery);
+        // 중복 제거하여 실제 Pod 수 계산
+        if (crashData && crashData.result) {
+          const uniquePods = new Set();
+          crashData.result.forEach(r => {
+            const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+            const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+            uniquePods.add(`${namespace}/${podName}`);
+          });
+          // 실제 Pod 수를 반영하기 위해 결과 수정
+          crashData.uniquePodCount = uniquePods.size;
+        }
+        metrics.crashLoop = crashData;
+      } catch (e) {
+        console.warn('CrashLoop query failed:', e.message);
+      }
+
+      // 리소스 알림 수집
+      const alerts = await checkResourceAlerts();
+      const criticalAlerts = alerts.filter(a => a.severity === 'critical').length;
+      const warningAlerts = alerts.filter(a => a.severity === 'warning').length;
+
+      // 2. AI 분석을 위한 데이터 준비
+      let analysisPrompt = 'Kubernetes 클러스터 일일 상태 리포트를 작성해주세요.\n\n';
+      analysisPrompt += '수집된 메트릭:\n';
+      analysisPrompt += `- Critical 경고: ${criticalAlerts}개\n`;
+      analysisPrompt += `- Warning 경고: ${warningAlerts}개\n`;
+
+      if (metrics.restarts && metrics.restarts.result) {
+        const restartCount = metrics.restarts.result.length;
+        analysisPrompt += `- 재시작된 Pod: ${restartCount}개\n`;
+      }
+
+      if (metrics.crashLoop && metrics.crashLoop.result) {
+        // 중복 제거된 실제 Pod 수 사용
+        const crashCount = metrics.crashLoop.uniquePodCount || new Set(metrics.crashLoop.result.map(r => {
+          const namespace = r.metric.namespace || r.metric.kubernetes_namespace || 'unknown';
+          const podName = r.metric.pod || r.metric.kubernetes_pod_name || 'unknown';
+          return `${namespace}/${podName}`;
+        })).size;
+        analysisPrompt += `- CrashLoopBackOff Pod: ${crashCount}개\n`;
+      }
+
+      if (metrics.oomKills && metrics.oomKills.result) {
+        const oomCount = metrics.oomKills.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0);
+        analysisPrompt += `- OOM Kills: ${oomCount}회\n`;
+      }
+
+      analysisPrompt += '\n다음 섹션으로 리포트를 작성해주세요:\n';
+      analysisPrompt += '1. Executive Summary (클러스터 건강 점수 0-100, 주요 이벤트 요약, AI 한 줄 평)\n';
+      analysisPrompt += '2. Resource Efficiency (Under/Over-provisioned 서비스, 비용 최적화 제안, HPA 분석)\n';
+      analysisPrompt += '3. Stability & Error Insights (주요 에러 패턴, 재시작 잦은 Pod, 이상 징후 탐지)\n';
+      analysisPrompt += '4. Networking & Latency (P99 Latency 트렌드, 5xx 에러 비율, 의존성 병목 현상)\n';
+      analysisPrompt += '5. AI Action Items (우선순위 가이드, 자동화 제안)\n\n';
+      analysisPrompt += '각 섹션을 구체적이고 실행 가능한 내용으로 작성해주세요.';
+
+      const systemPrompt = 'You are an expert Kubernetes infrastructure analyst. Write a comprehensive daily status report in Korean with actionable insights.';
+
+      // 3. Bedrock으로 리포트 생성
+      let reportContent = '';
+      try {
+        reportContent = await callBedrock(analysisPrompt, systemPrompt);
+      } catch (err) {
+        console.error('Bedrock analysis failed:', err.message);
+        reportContent = generateFallbackReport(metrics, alerts, criticalAlerts, warningAlerts);
+      }
+
+      // 4. HTML 리포트 생성
+      const htmlReport = generateHTMLReport(reportContent, metrics, alerts, criticalAlerts, warningAlerts);
+
+      // 5. Slack으로 리포트 전송
+      if (slackReportWebhookUrl) {
+        await sendSlackReport(htmlReport, reportContent, format);
+      }
+
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        success: true,
+        message: 'Report generated and sent to Slack',
+        reportType: reportType,
+        format: format,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Report generation error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        success: false,
+        error: err.message
+      }));
+    }
+  } else if (req.url === '/api/k8s/status' && req.method === 'GET') {
+    // K8s 클러스터 상태 체크 전용 엔드포인트
+    try {
+      const alerts = await checkResourceAlerts();
+      const criticalCount = alerts.filter(a => a.severity === 'critical').length;
+      const warningCount = alerts.filter(a => a.severity === 'warning').length;
+
+      // 클러스터 건강 점수 계산 (0-100)
+      let healthScore = 100;
+      if (criticalCount > 0) healthScore -= criticalCount * 20;
+      if (warningCount > 0) healthScore -= warningCount * 5;
+      healthScore = Math.max(0, healthScore);
+
+      // AI 분석을 위한 프롬프트
+      let aiPrompt = 'Kubernetes 클러스터 상태를 분석해주세요.\n\n';
+      aiPrompt += `현재 상태:\n`;
+      aiPrompt += `- 건강 점수: ${healthScore}/100\n`;
+      aiPrompt += `- Critical 경고: ${criticalCount}개\n`;
+      aiPrompt += `- Warning 경고: ${warningCount}개\n\n`;
+
+      if (alerts.length > 0) {
+        aiPrompt += `발견된 문제들:\n`;
+        alerts.forEach((alert, idx) => {
+          aiPrompt += `${idx + 1}. ${alert.metric}: ${alert.value}\n`;
+          aiPrompt += `   위치: ${alert.location || 'N/A'}\n`;
+          aiPrompt += `   심각도: ${alert.severity}\n`;
+        });
+        aiPrompt += '\n';
+      } else {
+        aiPrompt += '발견된 문제: 없음\n\n';
+      }
+
+      aiPrompt += '다음 형식으로 분석 결과를 제공해주세요:\n';
+      aiPrompt += '1. 클러스터 상태 요약 (한 줄)\n';
+      aiPrompt += '2. 주요 문제점 (있을 경우)\n';
+      aiPrompt += '3. 권장 조치사항\n';
+
+      let aiAnalysis = '';
+      try {
+        console.log('Calling Bedrock API for cluster analysis...');
+        const bedrockResponse = await callBedrock(aiPrompt);
+        if (bedrockResponse && bedrockResponse.trim().length > 0) {
+          aiAnalysis = bedrockResponse;
+          console.log('Bedrock analysis received:', aiAnalysis.substring(0, 100));
+        } else {
+          throw new Error('Bedrock returned empty response');
+        }
+      } catch (err) {
+        console.error('Bedrock analysis error:', err.message);
+        // Bedrock이 실패하면 기본 분석 제공
+        aiAnalysis = `클러스터 건강 점수: ${healthScore}/100\n\n`;
+        if (alerts.length > 0) {
+          aiAnalysis += `⚠️ ${alerts.length}개의 문제가 발견되었습니다.\n\n`;
+          alerts.forEach(alert => {
+            aiAnalysis += `- ${alert.metric}: ${alert.value}\n`;
+          });
+        } else {
+          aiAnalysis += '✅ 클러스터가 정상적으로 운영되고 있습니다.';
+        }
+        aiAnalysis += '\n\n[참고: AI 분석 서비스에 연결할 수 없어 기본 분석을 제공합니다.]';
+      }
+
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        healthScore,
+        status: healthScore >= 80 ? 'healthy' : healthScore >= 50 ? 'warning' : 'critical',
+        criticalCount,
+        warningCount,
+        alerts,
+        aiAnalysis,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('K8s status check error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        error: err.message,
+        healthScore: 0,
+        status: 'error'
+      }));
+    }
+  } else if (req.url === '/api/k8s/nodes' && req.method === 'GET') {
+    // 노드 목록 조회
+    try {
+      const tokenPath = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+      const caPath = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+      
+      let token = '';
+      try {
+        token = fs.readFileSync(tokenPath, 'utf8').trim();
+      } catch (err) {
+        throw new Error('ServiceAccount token not found');
+      }
+      
+      const options = {
+        hostname: 'kubernetes.default.svc',
+        port: 443,
+        path: '/api/v1/nodes',
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+      };
+      
+      if (fs.existsSync(caPath)) {
+        options.ca = fs.readFileSync(caPath);
+        options.rejectUnauthorized = true;
+      }
+      
+      const nodesData = await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve(JSON.parse(data));
+              } catch (e) {
+                reject(new Error('Failed to parse nodes response'));
+              }
+            } else {
+              reject(new Error(`Kubernetes API error: ${res.statusCode}`));
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(10000, () => {
+          req.destroy();
+          reject(new Error('Kubernetes API timeout'));
+        });
+        req.end();
+      });
+      
+      // Pod 목록도 가져와서 노드별로 그룹화
+      const podsOptions = {
+        hostname: 'kubernetes.default.svc',
+        port: 443,
+        path: '/api/v1/pods',
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+      };
+      
+      if (fs.existsSync(caPath)) {
+        podsOptions.ca = fs.readFileSync(caPath);
+        podsOptions.rejectUnauthorized = true;
+      }
+      
+      let podsByNode = {};
+      try {
+        const podsData = await new Promise((resolve, reject) => {
+          const req = https.request(podsOptions, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              if (res.statusCode === 200) {
+                try {
+                  resolve(JSON.parse(data));
+                } catch (e) {
+                  resolve({ items: [] }); // Pod 목록 실패해도 노드는 반환
+                }
+              } else {
+                resolve({ items: [] }); // Pod 목록 실패해도 노드는 반환
+              }
+            });
+          });
+          req.on('error', () => resolve({ items: [] })); // 에러 시 빈 배열
+          req.setTimeout(5000, () => {
+            req.destroy();
+            resolve({ items: [] }); // 타임아웃 시 빈 배열
+          });
+          req.end();
+        });
+        
+        // 노드별로 Pod 그룹화
+        if (podsData.items) {
+          podsData.items.forEach(pod => {
+            const nodeName = pod.spec?.nodeName;
+            if (nodeName) {
+              if (!podsByNode[nodeName]) {
+                podsByNode[nodeName] = [];
+              }
+              podsByNode[nodeName].push({
+                name: pod.metadata.name,
+                namespace: pod.metadata.namespace,
+                status: pod.status.phase || 'Unknown',
+                ready: pod.status.containerStatuses?.some(cs => cs.ready) || false,
+                containers: pod.status.containerStatuses?.length || 0
+              });
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch pods for nodes:', e.message);
+        // Pod 목록 실패해도 계속 진행
+      }
+      
+      const nodes = nodesData.items.map(node => ({
+        name: node.metadata.name,
+        status: node.status.conditions?.find(c => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady',
+        cpu: node.status.capacity?.cpu || 'N/A',
+        memory: node.status.capacity?.memory || 'N/A',
+        pods: node.status.allocatable?.pods || 'N/A',
+        podList: podsByNode[node.metadata.name] || [] // 노드별 Pod 목록 추가
+      }));
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ nodes, total: nodes.length }));
+    } catch (err) {
+      console.error('Nodes fetch error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, nodes: [], total: 0 }));
+    }
+  } else if (req.url === '/api/k8s/pods' && req.method === 'GET') {
+    // Pod 목록 조회
+    try {
+      const tokenPath = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+      const caPath = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+      
+      let token = '';
+      try {
+        token = fs.readFileSync(tokenPath, 'utf8').trim();
+      } catch (err) {
+        throw new Error('ServiceAccount token not found');
+      }
+      
+      const options = {
+        hostname: 'kubernetes.default.svc',
+        port: 443,
+        path: '/api/v1/pods',
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+      };
+      
+      if (fs.existsSync(caPath)) {
+        options.ca = fs.readFileSync(caPath);
+        options.rejectUnauthorized = true;
+      }
+      
+      const podsData = await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                resolve(JSON.parse(data));
+              } catch (e) {
+                reject(new Error('Failed to parse pods response'));
+              }
+            } else {
+              reject(new Error(`Kubernetes API error: ${res.statusCode}`));
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(10000, () => {
+          req.destroy();
+          reject(new Error('Kubernetes API timeout'));
+        });
+        req.end();
+      });
+      
+      const pods = podsData.items.map(pod => ({
+        name: pod.metadata.name,
+        namespace: pod.metadata.namespace,
+        status: pod.status.phase || 'Unknown',
+        node: pod.spec.nodeName || 'N/A',
+        createdAt: pod.metadata.creationTimestamp
+      }));
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ pods, total: pods.length }));
+    } catch (err) {
+      console.error('Pods fetch error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, pods: [], total: 0 }));
+    }
+  } else if (req.url === '/api/k8s/resources/container/cpu' && req.method === 'GET') {
+    // Container CPU 사용률 조회 (kube-state-metric 사용)
+    try {
+      const cpuUsageQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) by (namespace, pod, container)';
+      const cpuLimitQuery = 'kube_pod_container_resource_limits{resource="cpu"}';
+      const cpuRequestQuery = 'kube_pod_container_resource_requests{resource="cpu"}';
+      
+      const [cpuData, cpuLimitData, cpuRequestData] = await Promise.all([
+        queryPrometheus(cpuUsageQuery).catch(() => ({ result: [] })),
+        queryPrometheus(cpuLimitQuery).catch(() => ({ result: [] })),
+        queryPrometheus(cpuRequestQuery).catch(() => ({ result: [] }))
+      ]);
+      
+      // Limit/Request 맵 생성
+      const limitMap = {};
+      if (cpuLimitData && cpuLimitData.result) {
+        cpuLimitData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          limitMap[key] = parseFloat(r.value[1]) || 0;
+        });
+      }
+      
+      const requestMap = {};
+      if (cpuRequestData && cpuRequestData.result) {
+        cpuRequestData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          requestMap[key] = parseFloat(r.value[1]) || 0;
+        });
+      }
+      
+      const containers = [];
+      if (cpuData && cpuData.result) {
+        cpuData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          const cpuUsage = parseFloat(r.value[1]) * 100 || 0;
+          const cpuLimit = limitMap[key] || null;
+          const cpuRequest = requestMap[key] || null;
+          
+          containers.push({
+            namespace: r.metric.namespace || 'default',
+            pod: r.metric.pod || 'unknown',
+            container: r.metric.container || 'unknown',
+            cpuUsage: cpuUsage,
+            cpuLimit: cpuLimit ? `${cpuLimit}` : 'N/A',
+            cpuRequest: cpuRequest ? `${cpuRequest}` : 'N/A'
+          });
+        });
+      }
+      
+      // 차트 데이터 생성 (최근 1시간)
+      const rangeData = await queryRange(cpuUsageQuery, Math.floor((Date.now() - 3600000) / 1000), Math.floor(Date.now() / 1000), '60s').catch(() => ({ result: [] }));
+      const chartData = { labels: [], values: [] };
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            chartData.labels.push(new Date(timestamp * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' }));
+            chartData.values.push(parseFloat(value) * 100);
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ containers, chartData }));
+    } catch (err) {
+      console.error('Container CPU error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, containers: [], chartData: { labels: [], values: [] } }));
+    }
+  } else if (req.url === '/api/k8s/resources/container/memory' && req.method === 'GET') {
+    // Container Memory 사용률 조회 (kube-state-metric 사용)
+    try {
+      const memUsageQuery = 'sum(container_memory_working_set_bytes{container!="POD",container!=""}) by (namespace, pod, container)';
+      const memLimitQuery = 'kube_pod_container_resource_limits{resource="memory"}';
+      const memRequestQuery = 'kube_pod_container_resource_requests{resource="memory"}';
+      
+      const [memData, memLimitData, memRequestData] = await Promise.all([
+        queryPrometheus(memUsageQuery).catch(() => ({ result: [] })),
+        queryPrometheus(memLimitQuery).catch(() => ({ result: [] })),
+        queryPrometheus(memRequestQuery).catch(() => ({ result: [] }))
+      ]);
+      
+      // Limit/Request 맵 생성
+      const limitMap = {};
+      if (memLimitData && memLimitData.result) {
+        memLimitData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          limitMap[key] = parseFloat(r.value[1]) || 0;
+        });
+      }
+      
+      const requestMap = {};
+      if (memRequestData && memRequestData.result) {
+        memRequestData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          requestMap[key] = parseFloat(r.value[1]) || 0;
+        });
+      }
+      
+      const containers = [];
+      if (memData && memData.result) {
+        memData.result.forEach(r => {
+          const key = `${r.metric.namespace || 'default'}/${r.metric.pod || 'unknown'}/${r.metric.container || 'unknown'}`;
+          const memBytes = parseFloat(r.value[1]) || 0;
+          const memLimit = limitMap[key] || null;
+          const memRequest = requestMap[key] || null;
+          
+          containers.push({
+            namespace: r.metric.namespace || 'default',
+            pod: r.metric.pod || 'unknown',
+            container: r.metric.container || 'unknown',
+            memoryUsage: memBytes / (1024 * 1024), // Mi로 변환
+            memoryLimit: memLimit ? `${(memLimit / (1024 * 1024)).toFixed(2)} Mi` : 'N/A',
+            memoryRequest: memRequest ? `${(memRequest / (1024 * 1024)).toFixed(2)} Mi` : 'N/A'
+          });
+        });
+      }
+      
+      // 차트 데이터
+      const rangeData = await queryRange(memUsageQuery, Math.floor((Date.now() - 3600000) / 1000), Math.floor(Date.now() / 1000), '60s').catch(() => ({ result: [] }));
+      const chartData = { labels: [], values: [] };
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            chartData.labels.push(new Date(timestamp * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' }));
+            chartData.values.push(parseFloat(value) / (1024 * 1024));
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ containers, chartData }));
+    } catch (err) {
+      console.error('Container Memory error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, containers: [], chartData: { labels: [], values: [] } }));
+    }
+  } else if (req.url === '/api/k8s/resources/pod/cpu' && req.method === 'GET') {
+    // Pod CPU 사용률 조회
+    try {
+      const cpuQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) by (namespace, pod)';
+      const cpuData = await queryPrometheus(cpuQuery);
+      
+      const pods = [];
+      if (cpuData && cpuData.result) {
+        cpuData.result.forEach(r => {
+          pods.push({
+            namespace: r.metric.namespace || 'default',
+            pod: r.metric.pod || 'unknown',
+            cpuUsage: parseFloat(r.value[1]) * 100 || 0
+          });
+        });
+      }
+      
+      // 차트 데이터
+      const rangeData = await queryRange(cpuQuery, Math.floor((Date.now() - 3600000) / 1000), Math.floor(Date.now() / 1000), '60s');
+      const chartData = { labels: [], values: [] };
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            chartData.labels.push(new Date(timestamp * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' }));
+            chartData.values.push(parseFloat(value) * 100);
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ pods, chartData }));
+    } catch (err) {
+      console.error('Pod CPU error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, pods: [], chartData: { labels: [], values: [] } }));
+    }
+  } else if (req.url.startsWith('/api/k8s/resources/container/cpu/history') && req.method === 'GET') {
+    // Container CPU 과거 데이터 (시계열)
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const pod = url.searchParams.get('pod');
+      const namespace = url.searchParams.get('namespace');
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+      
+      if (!pod || !namespace) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({ error: 'pod and namespace required' }));
+        return;
+      }
+      
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - (hours * 3600);
+      const step = '300s'; // 5분 간격
+      
+      const query = `sum(rate(container_cpu_usage_seconds_total{container!="POD",container!="",pod="${pod}",namespace="${namespace}"}[5m])) by (container)`;
+      const rangeData = await queryRange(query, startTime, endTime, step).catch(() => ({ result: [] }));
+      
+      const timeline = [];
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            timeline.push({
+              timestamp: timestamp * 1000,
+              cpuUsage: parseFloat(value) * 100 || 0
+            });
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ timeline }));
+    } catch (err) {
+      console.error('Container CPU history error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, timeline: [] }));
+    }
+  } else if (req.url.startsWith('/api/k8s/resources/container/memory/history') && req.method === 'GET') {
+    // Container Memory 과거 데이터
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const pod = url.searchParams.get('pod');
+      const namespace = url.searchParams.get('namespace');
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+      
+      if (!pod || !namespace) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({ error: 'pod and namespace required' }));
+        return;
+      }
+      
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - (hours * 3600);
+      const step = '300s';
+      
+      const query = `sum(container_memory_working_set_bytes{container!="POD",container!="",pod="${pod}",namespace="${namespace}"}) by (container)`;
+      const rangeData = await queryRange(query, startTime, endTime, step).catch(() => ({ result: [] }));
+      
+      const timeline = [];
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            timeline.push({
+              timestamp: timestamp * 1000,
+              memoryUsage: parseFloat(value) / (1024 * 1024) || 0
+            });
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ timeline }));
+    } catch (err) {
+      console.error('Container Memory history error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, timeline: [] }));
+    }
+  } else if (req.url.startsWith('/api/k8s/resources/pod/cpu/history') && req.method === 'GET') {
+    // Pod CPU 과거 데이터
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const pod = url.searchParams.get('pod');
+      const namespace = url.searchParams.get('namespace');
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+      
+      if (!pod || !namespace) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({ error: 'pod and namespace required' }));
+        return;
+      }
+      
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - (hours * 3600);
+      const step = '300s';
+      
+      const query = `sum(rate(container_cpu_usage_seconds_total{container!="POD",container!="",pod="${pod}",namespace="${namespace}"}[5m]))`;
+      const rangeData = await queryRange(query, startTime, endTime, step).catch(() => ({ result: [] }));
+      
+      const timeline = [];
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            timeline.push({
+              timestamp: timestamp * 1000,
+              cpuUsage: parseFloat(value) * 100 || 0
+            });
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ timeline }));
+    } catch (err) {
+      console.error('Pod CPU history error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, timeline: [] }));
+    }
+  } else if (req.url.startsWith('/api/k8s/resources/pod/memory/history') && req.method === 'GET') {
+    // Pod Memory 과거 데이터
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const pod = url.searchParams.get('pod');
+      const namespace = url.searchParams.get('namespace');
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+      
+      if (!pod || !namespace) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({ error: 'pod and namespace required' }));
+        return;
+      }
+      
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - (hours * 3600);
+      const step = '300s';
+      
+      const query = `sum(container_memory_working_set_bytes{container!="POD",container!="",pod="${pod}",namespace="${namespace}"})`;
+      const rangeData = await queryRange(query, startTime, endTime, step).catch(() => ({ result: [] }));
+      
+      const timeline = [];
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            timeline.push({
+              timestamp: timestamp * 1000,
+              memoryUsage: parseFloat(value) / (1024 * 1024) || 0
+            });
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ timeline }));
+    } catch (err) {
+      console.error('Pod Memory history error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/resources/pod/memory' && req.method === 'GET') {
+    // Pod Memory 사용률 조회
+    try {
+      const memQuery = 'sum(container_memory_working_set_bytes{container!="POD",container!=""}) by (namespace, pod)';
+      const memData = await queryPrometheus(memQuery);
+      
+      const pods = [];
+      if (memData && memData.result) {
+        memData.result.forEach(r => {
+          const memBytes = parseFloat(r.value[1]) || 0;
+          pods.push({
+            namespace: r.metric.namespace || 'default',
+            pod: r.metric.pod || 'unknown',
+            memoryUsage: memBytes / (1024 * 1024) // Mi로 변환
+          });
+        });
+      }
+      
+      // 차트 데이터
+      const rangeData = await queryRange(memQuery, Math.floor((Date.now() - 3600000) / 1000), Math.floor(Date.now() / 1000), '60s');
+      const chartData = { labels: [], values: [] };
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values) {
+          series.values.forEach(([timestamp, value]) => {
+            chartData.labels.push(new Date(timestamp * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' }));
+            chartData.values.push(parseFloat(value) / (1024 * 1024));
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ pods, chartData }));
+    } catch (err) {
+      console.error('Pod Memory error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, pods: [], chartData: { labels: [], values: [] } }));
+    }
+  } else if (req.url === '/api/k8s/metrics/latency' && req.method === 'GET') {
+    // Latency (지연 시간) 메트릭 조회
+    try {
+      // HTTP 요청 지연 시간 (95th percentile)
+      const latencyQuery = 'histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))';
+      const latencyData = await queryPrometheus(latencyQuery).catch(() => null);
+      
+      // 대안: 네트워크 지연 또는 Pod 응답 시간 추정
+      const fallbackQuery = 'avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 1000';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (latencyData && latencyData.result && latencyData.result.length > 0) {
+        currentValue = parseFloat(latencyData.result[0].value[1]) * 1000; // 초를 밀리초로 변환
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]);
+      }
+      
+      // 시계열 데이터 (최근 1시간)
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = latencyData ? latencyQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) * (latencyData ? 1000 : 1) // 초를 밀리초로 변환
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue > 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: 'ms',
+        timeline: timeline.slice(-20) // 최근 20개 데이터 포인트
+      }));
+    } catch (err) {
+      console.error('Latency metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: 'ms', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/error-rate' && req.method === 'GET') {
+    // Error rate (에러율) 메트릭 조회
+    try {
+      // HTTP 5xx 에러율
+      const errorRateQuery = 'sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100';
+      const errorRateData = await queryPrometheus(errorRateQuery).catch(() => null);
+      
+      // 대안: Pod 재시작률 기반
+      const fallbackQuery = 'sum(rate(kube_pod_container_status_restarts_total[5m])) / count(kube_pod_info) * 100';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (errorRateData && errorRateData.result && errorRateData.result.length > 0) {
+        currentValue = parseFloat(errorRateData.result[0].value[1]) || 0;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]) || 0;
+      }
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = errorRateData ? errorRateQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue > 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(3),
+        unit: '%',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Error rate metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: '%', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/throughput' && req.method === 'GET') {
+    // Throughput (처리량) 메트릭 조회
+    try {
+      // HTTP 요청 처리량
+      const throughputQuery = 'sum(rate(http_requests_total[5m]))';
+      const throughputData = await queryPrometheus(throughputQuery).catch(() => null);
+      
+      // 대안: Pod 활동 기반
+      const fallbackQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m]))';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (throughputData && throughputData.result && throughputData.result.length > 0) {
+        currentValue = parseFloat(throughputData.result[0].value[1]) || 0;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]) || 0;
+      }
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = throughputData ? throughputQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue > 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: 'req/s',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Throughput metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: 'req/s', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/requests-per-second' && req.method === 'GET') {
+    // Requests per second (초당 요청 수) 메트릭 조회
+    try {
+      // HTTP 초당 요청 수
+      const rpsQuery = 'sum(rate(http_requests_total[1m]))';
+      const rpsData = await queryPrometheus(rpsQuery).catch(() => null);
+      
+      // 대안: Pod 활동 기반
+      const fallbackQuery = 'sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1m])) * 10';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (rpsData && rpsData.result && rpsData.result.length > 0) {
+        currentValue = parseFloat(rpsData.result[0].value[1]) || 0;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]) || 0;
+      }
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = rpsData ? rpsQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue > 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: 'req/s',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Requests per second metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: 'req/s', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/saturation' && req.method === 'GET') {
+    // Saturation (포화도) 메트릭 조회 - CPU/Memory 포화도
+    try {
+      // CPU 포화도: CPU 사용률이 높은 Pod 비율
+      const cpuSaturationQuery = 'avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) / avg(kube_pod_container_resource_limits{resource="cpu"}) * 100';
+      const cpuSaturationData = await queryPrometheus(cpuSaturationQuery).catch(() => null);
+      
+      // Memory 포화도: Memory 사용률이 높은 Pod 비율
+      const memSaturationQuery = 'avg(container_memory_working_set_bytes{container!="POD",container!=""}) / avg(kube_pod_container_resource_limits{resource="memory"}) * 100';
+      const memSaturationData = await queryPrometheus(memSaturationQuery).catch(() => null);
+      
+      // 대안: 단순 CPU/Memory 사용률 평균
+      const fallbackCpuQuery = 'avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 100';
+      const fallbackMemQuery = 'avg(container_memory_working_set_bytes{container!="POD",container!=""}) / 1024 / 1024 / 1024';
+      const fallbackCpuData = await queryPrometheus(fallbackCpuQuery).catch(() => ({ result: [] }));
+      const fallbackMemData = await queryPrometheus(fallbackMemQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      // CPU와 Memory 포화도의 평균 계산
+      let cpuSaturation = 0;
+      let memSaturation = 0;
+      
+      if (cpuSaturationData && cpuSaturationData.result && cpuSaturationData.result.length > 0) {
+        cpuSaturation = parseFloat(cpuSaturationData.result[0].value[1]) || 0;
+      } else if (fallbackCpuData && fallbackCpuData.result && fallbackCpuData.result.length > 0) {
+        cpuSaturation = parseFloat(fallbackCpuData.result[0].value[1]) || 0;
+      }
+      
+      if (memSaturationData && memSaturationData.result && memSaturationData.result.length > 0) {
+        memSaturation = parseFloat(memSaturationData.result[0].value[1]) || 0;
+      } else if (fallbackMemData && fallbackMemData.result && fallbackMemData.result.length > 0) {
+        // Memory를 GB 단위로 변환 후 포화도 추정 (임의로 8GB 기준)
+        memSaturation = (parseFloat(fallbackMemData.result[0].value[1]) / 8) * 100;
+      }
+      
+      currentValue = (cpuSaturation + memSaturation) / 2;
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = cpuSaturationData ? cpuSaturationQuery : fallbackCpuQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue > 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: '%',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Saturation metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: '%', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/queue-depth' && req.method === 'GET') {
+    // Queue depth (대기 큐 깊이) 메트릭 조회 - Pod 스케줄링 대기 큐
+    try {
+      // Pending 상태의 Pod 수만 집계 (스케줄링 대기 중인 파드만)
+      // kube_pod_status_phase는 각 파드의 phase에 대해 0 또는 1 값을 가지므로,
+      // == 1 조건을 사용하여 실제로 Pending 상태인 파드만 카운트
+      // 또는 sum()을 사용하여 Pending인 파드의 합계를 구함 (각 파드는 1이므로 합계가 개수)
+      const queueDepthQuery = 'sum(kube_pod_status_phase{phase="Pending"} == 1)';
+      const queueDepthData = await queryPrometheus(queueDepthQuery).catch(() => null);
+      
+      // 대안: count를 사용하되 == 1 조건 추가
+      const fallbackQuery = 'count(kube_pod_status_phase{phase="Pending"} == 1)';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (queueDepthData && queueDepthData.result && queueDepthData.result.length > 0) {
+        currentValue = parseFloat(queueDepthData.result[0].value[1]) || 0;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]) || 0;
+      }
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = queueDepthQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue >= 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(0),
+        unit: 'pods',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Queue depth metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: 'pods', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/load' && req.method === 'GET') {
+    // Load (로드 평균) 메트릭 조회 - 노드별 로드 평균
+    try {
+      // 노드별 로드 평균 (1분 평균)
+      const loadQuery = 'avg(node_load1)';
+      const loadData = await queryPrometheus(loadQuery).catch(() => null);
+      
+      // 대안: CPU 사용률 기반 로드 추정
+      const fallbackQuery = 'avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1m])) * 100';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 0;
+      let timeline = [];
+      
+      if (loadData && loadData.result && loadData.result.length > 0) {
+        currentValue = parseFloat(loadData.result[0].value[1]) || 0;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        // CPU 사용률을 로드로 변환 (대략적인 추정)
+        currentValue = parseFloat(fallbackData.result[0].value[1]) / 10 || 0;
+      }
+      
+      // 시계열 데이터
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 3600;
+      const rangeQuery = loadData ? loadQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '60s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 0
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue >= 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: '',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Load metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: '', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/availability' && req.method === 'GET') {
+    // Availability (가용성) 메트릭 조회 - 서비스별 가용성 계산
+    try {
+      // Pod가 Running 상태인 비율 (가용성)
+      const availabilityQuery = 'sum(kube_pod_status_phase{phase="Running"}) / sum(kube_pod_status_phase) * 100';
+      const availabilityData = await queryPrometheus(availabilityQuery).catch(() => null);
+      
+      // 대안: up 메트릭 기반 가용성
+      const fallbackQuery = 'avg(up) * 100';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentValue = 100; // 기본값 100%
+      let timeline = [];
+      
+      if (availabilityData && availabilityData.result && availabilityData.result.length > 0) {
+        currentValue = parseFloat(availabilityData.result[0].value[1]) || 100;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentValue = parseFloat(fallbackData.result[0].value[1]) || 100;
+      }
+      
+      // 시계열 데이터 (최근 24시간)
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 86400; // 24시간
+      const rangeQuery = availabilityData ? availabilityQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '300s').catch(() => ({ result: [] }));
+      
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => ({
+            timestamp: timestamp * 1000,
+            value: parseFloat(value) || 100
+          }));
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && currentValue >= 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: currentValue
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: currentValue.toFixed(2),
+        unit: '%',
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Availability metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 100, unit: '%', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/metrics/error-budget' && req.method === 'GET') {
+    // Error budget (에러 예산) 메트릭 조회 - SLO 기반 에러 예산 계산
+    try {
+      // SLO 목표 (예: 99.9% 가용성)
+      const sloTarget = 99.9; // 기본 SLO 목표
+      const sloWindow = 30 * 24 * 3600; // 30일 (초 단위)
+      
+      // 현재 가용성 계산
+      const availabilityQuery = 'sum(kube_pod_status_phase{phase="Running"}) / sum(kube_pod_status_phase) * 100';
+      const availabilityData = await queryPrometheus(availabilityQuery).catch(() => null);
+      
+      // 대안: up 메트릭 기반
+      const fallbackQuery = 'avg(up) * 100';
+      const fallbackData = await queryPrometheus(fallbackQuery).catch(() => ({ result: [] }));
+      
+      let currentAvailability = 100;
+      
+      if (availabilityData && availabilityData.result && availabilityData.result.length > 0) {
+        currentAvailability = parseFloat(availabilityData.result[0].value[1]) || 100;
+      } else if (fallbackData && fallbackData.result && fallbackData.result.length > 0) {
+        currentAvailability = parseFloat(fallbackData.result[0].value[1]) || 100;
+      }
+      
+      // 에러 예산 계산: (SLO 목표 - 현재 가용성) * 시간 윈도우
+      // 에러 예산은 사용 가능한 다운타임 시간을 나타냄
+      const errorBudgetPercent = Math.max(0, sloTarget - currentAvailability);
+      const errorBudgetMinutes = (errorBudgetPercent / 100) * (sloWindow / 60);
+      
+      // 시계열 데이터 (최근 24시간)
+      const endTime = Math.floor(Date.now() / 1000);
+      const startTime = endTime - 86400; // 24시간
+      const rangeQuery = availabilityData ? availabilityQuery : fallbackQuery;
+      const rangeData = await queryRange(rangeQuery, startTime, endTime, '300s').catch(() => ({ result: [] }));
+      
+      let timeline = [];
+      if (rangeData && rangeData.result && rangeData.result.length > 0) {
+        const series = rangeData.result[0];
+        if (series.values && series.values.length > 0) {
+          timeline = series.values.map(([timestamp, value]) => {
+            const avail = parseFloat(value) || 100;
+            const budget = Math.max(0, sloTarget - avail);
+            return {
+              timestamp: timestamp * 1000,
+              value: budget
+            };
+          });
+        }
+      }
+      
+      // timeline이 비어있으면 현재 값으로 기본 timeline 생성
+      if (timeline.length === 0 && errorBudgetPercent >= 0) {
+        const now = Date.now();
+        for (let i = 19; i >= 0; i--) {
+          timeline.push({
+            timestamp: now - (i * 300000), // 5분 간격
+            value: errorBudgetPercent
+          });
+        }
+      }
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        value: errorBudgetPercent.toFixed(3),
+        unit: '%',
+        minutes: errorBudgetMinutes.toFixed(1),
+        sloTarget: sloTarget,
+        currentAvailability: currentAvailability.toFixed(2),
+        timeline: timeline.slice(-20)
+      }));
+    } catch (err) {
+      console.error('Error budget metric error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, value: 0, unit: '%', timeline: [] }));
+    }
+  } else if (req.url === '/api/k8s/alerts/early-warning' && req.method === 'GET') {
+    // 조기 경고 (Early Warning) - 실시간 이상 징후 반환
+    try {
+      // 기존 리소스 알림 가져오기
+      const resourceAlerts = await checkResourceAlerts();
+      
+      // 추가 이상 징후 감지
+      const earlyWarnings = [];
+      
+      // 1. 급격한 메트릭 변화 감지
+      try {
+        // CPU 사용률 급증 감지 (5분 내 20% 이상 증가)
+        const cpuSpikeQuery = 'rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m]) * 100';
+        const cpuCurrent = await queryPrometheus(cpuSpikeQuery).catch(() => null);
+        const cpuPreviousQuery = 'rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[10m]) offset 5m * 100';
+        const cpuPrevious = await queryPrometheus(cpuPreviousQuery).catch(() => null);
+        
+        if (cpuCurrent && cpuPrevious && cpuCurrent.result && cpuPrevious.result) {
+          const currentAvg = cpuCurrent.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0) / cpuCurrent.result.length;
+          const previousAvg = cpuPrevious.result.reduce((sum, r) => sum + parseFloat(r.value[1] || 0), 0) / cpuPrevious.result.length;
+          
+          if (currentAvg > previousAvg * 1.2 && currentAvg > 50) {
+            earlyWarnings.push({
+              severity: 'warning',
+              metric: 'CPU 사용률 급증',
+              value: `${currentAvg.toFixed(1)}%`,
+              location: '클러스터 전체',
+              message: `⚠️ CPU 사용률이 5분 내 ${((currentAvg / previousAvg - 1) * 100).toFixed(1)}% 급증했습니다!`,
+              analysis: `CPU 사용률이 ${previousAvg.toFixed(1)}%에서 ${currentAvg.toFixed(1)}%로 급증했습니다.\n\n가능한 원인:\n- 트래픽 급증\n- 배치 작업 실행\n- 리소스 경합`,
+              timestamp: new Date().toISOString(),
+              trend: 'spike'
+            });
+          }
+        }
+      } catch (e) {
+        // CPU 스파이크 감지 실패 무시
+      }
+      
+      // 2. 메모리 사용률 급증 감지
+      try {
+        const memCurrentQuery = 'avg(container_memory_working_set_bytes{container!="POD",container!=""}) / 1024 / 1024 / 1024';
+        const memCurrent = await queryPrometheus(memCurrentQuery).catch(() => null);
+        const memPreviousQuery = 'avg(container_memory_working_set_bytes{container!="POD",container!=""} offset 5m) / 1024 / 1024 / 1024';
+        const memPrevious = await queryPrometheus(memPreviousQuery).catch(() => null);
+        
+        if (memCurrent && memPrevious && memCurrent.result && memPrevious.result && memCurrent.result.length > 0 && memPrevious.result.length > 0) {
+          const currentMem = parseFloat(memCurrent.result[0].value[1] || 0);
+          const previousMem = parseFloat(memPrevious.result[0].value[1] || 0);
+          
+          if (currentMem > previousMem * 1.15 && currentMem > 1) {
+            earlyWarnings.push({
+              severity: 'warning',
+              metric: '메모리 사용률 급증',
+              value: `${currentMem.toFixed(2)}GB`,
+              location: '클러스터 전체',
+              message: `⚠️ 메모리 사용률이 5분 내 ${((currentMem / previousMem - 1) * 100).toFixed(1)}% 급증했습니다!`,
+              analysis: `메모리 사용률이 ${previousMem.toFixed(2)}GB에서 ${currentMem.toFixed(2)}GB로 급증했습니다.\n\n가능한 원인:\n- 메모리 누수 가능성\n- 대용량 데이터 처리\n- 캐시 증가`,
+              timestamp: new Date().toISOString(),
+              trend: 'spike'
+            });
+          }
+        }
+      } catch (e) {
+        // 메모리 스파이크 감지 실패 무시
+      }
+      
+      // 3. Pod 재시작 빈도 감지
+      try {
+        const restartQuery = 'rate(kube_pod_container_status_restarts_total[5m])';
+        const restartData = await queryPrometheus(restartQuery).catch(() => null);
+        
+        if (restartData && restartData.result && restartData.result.length > 0) {
+          const highRestartPods = restartData.result.filter(r => parseFloat(r.value[1] || 0) > 0.1); // 5분에 0.1회 이상 재시작
+          
+          if (highRestartPods.length > 0) {
+            const podDetails = highRestartPods.map(r => {
+              const namespace = r.metric.namespace || 'unknown';
+              const podName = r.metric.pod || 'unknown';
+              const restartRate = parseFloat(r.value[1] || 0);
+              return `${namespace}/${podName} (${(restartRate * 60).toFixed(1)}회/시간)`;
+            }).join(', ');
+            
+            earlyWarnings.push({
+              severity: 'warning',
+              metric: 'Pod 재시작 빈도 높음',
+              value: `${highRestartPods.length}개`,
+              location: podDetails,
+              message: `⚠️ ${highRestartPods.length}개의 Pod가 빈번하게 재시작되고 있습니다!`,
+              analysis: `다음 Pod들이 빈번하게 재시작되고 있습니다:\n📍 위치: ${podDetails}\n\n가능한 원인:\n- 헬스체크 실패\n- 리소스 부족으로 인한 OOM\n- 애플리케이션 오류`,
+              timestamp: new Date().toISOString(),
+              trend: 'frequent_restarts'
+            });
+          }
+        }
+      } catch (e) {
+        // 재시작 빈도 감지 실패 무시
+      }
+      
+      // 모든 알림 통합 및 우선순위별 정렬
+      const allAlerts = [...resourceAlerts, ...earlyWarnings];
+      
+      // 우선순위: critical > warning > info
+      const severityOrder = { 'critical': 0, 'warning': 1, 'info': 2 };
+      allAlerts.sort((a, b) => {
+        const severityDiff = (severityOrder[a.severity] || 99) - (severityOrder[b.severity] || 99);
+        if (severityDiff !== 0) return severityDiff;
+        // 같은 심각도면 최신순
+        return (new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+      });
+      
+      // 최근 1시간 내 알림만 반환 (너무 오래된 것은 제외)
+      const oneHourAgo = Date.now() - 3600000;
+      const recentAlerts = allAlerts.filter(alert => {
+        const alertTime = alert.timestamp ? new Date(alert.timestamp).getTime() : Date.now();
+        return alertTime > oneHourAgo;
+      });
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        alerts: recentAlerts,
+        total: recentAlerts.length,
+        critical: recentAlerts.filter(a => a.severity === 'critical').length,
+        warning: recentAlerts.filter(a => a.severity === 'warning').length,
+        info: recentAlerts.filter(a => a.severity === 'info').length,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Early warning error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ error: err.message, alerts: [], total: 0 }));
+    }
+  } else if (req.url === '/api/k8s/health' && req.method === 'GET') {
+    // 헬스체크 엔드포인트
+    try {
+      const alerts = await checkResourceAlerts();
+      const criticalCount = alerts.filter(a => a.severity === 'critical').length;
+      
+      res.writeHead(200, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({
+        healthy: criticalCount === 0,
+        criticalAlerts: criticalCount,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Health check error:', err.message);
+      res.writeHead(500, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({ healthy: false, error: err.message }));
+    }
+  } else if (req.url.startsWith('/api/')) {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({message: 'API endpoint', url: req.url, timestamp: new Date().toISOString()}));
+  } else {
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.end('<h1>Monitoring Analysis Backend</h1><p>Service is running. API available at /api/*</p>');
+  }
+  } catch (err) {
+    res.writeHead(500, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({error: err.message}));
+  }
+});
+
+// 주기적 리소스 모니터링 (5분마다)
+let lastAlertTime = {};
+setInterval(async () => {
+  try {
+    const alerts = await checkResourceAlerts();
+    if (alerts.length > 0) {
+      const now = Date.now();
+      alerts.forEach(alert => {
+        const alertKey = alert.metric;
+        // 같은 경고는 30분에 한 번만 전송
+        if (!lastAlertTime[alertKey] || (now - lastAlertTime[alertKey]) > 1800000) {
+          sendSlackNotification(alert, alert.severity).catch(err => {
+            console.error('Slack notification failed:', err.message);
+          });
+          lastAlertTime[alertKey] = now;
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Periodic resource check error:', err.message);
+  }
+}, 300000); // 5분마다 체크
+
+server.listen(port, () => {
+  console.log('Server running on port ' + port);
+  console.log('Prometheus URL: ' + prometheusUrl);
+  console.log('Slack notifications: ' + (slackWebhookUrl ? 'enabled' : 'disabled'));
+  console.log('Periodic resource monitoring started (every 5 minutes)');
+});

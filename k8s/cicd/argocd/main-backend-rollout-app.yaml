@@ -1,0 +1,25 @@
+# ArgoCD Application for Argo Rollouts
+# 기존 backend-app.yaml과 병행하여 사용하거나 대체
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: main-backend-rollout
+  namespace: apc-cicd-ns
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/Alphacar-project/alphacar-k8s.git'
+    targetRevision: main
+    path: 'k8s/cicd/argorollouts'  # Rollout 경로
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: apc-be-ns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # Argo Rollouts는 수동 승인이 필요할 수 있으므로
+      # 자동 승인은 선택사항
+      # syncOptions:
+      #   - CreateNamespace=true
+

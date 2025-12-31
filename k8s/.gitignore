@@ -1,0 +1,6 @@
+monitoring-analysis/secret.yaml
+backend/apc-be-secret.yaml
+backend/alphacar-aichat-secret.yaml
+backend/alphacar-be-secret.yaml
+configmap-secret/secret-aws-bedrock.yaml
+*secret.yaml

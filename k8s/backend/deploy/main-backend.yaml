@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: main-backend
+  template:
+    metadata:
+      labels:
+        app: main-backend
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: main-backend
+        image: 192.168.0.170:30000/alphacar/alphacar-main:1.0.32-c1d0917
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http-main
+        env:
+        - name: PORT
+          value: "3000"
+        - name: SERVICE_NAME
+          value: "main-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_PORT
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_DB_NAME
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: main-backend
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: http-main
+  type: ClusterIP

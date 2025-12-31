@@ -1,0 +1,177 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+  labels:
+    app: main-backend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: main-backend
+  template:
+    metadata:
+      labels:
+        app: main-backend
+        version: stable  # 초기 버전
+      annotations:
+        sidecar.istio.io/inject: "true"  # Istio sidecar 자동 주입
+    spec:
+      imagePullSecrets:
+      - name: harbor-registry-secret
+      containers:
+      - name: main-backend
+        image: 192.168.0.170:30000/alphacar/alphacar-main:1.0.32-c1d0917
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http-main
+        env:
+        - name: PORT
+          value: "3000"
+        - name: SERVICE_NAME
+          value: "main-backend"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: alphacar-be-config
+              key: MARIADB_PORT
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: alphacar-be-secret
+              key: MARIADB_DB_NAME
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+  strategy:
+    canary:
+      # Istio 트래픽 관리 설정
+      trafficManagement:
+        istio:
+          virtualService:
+            name: main-backend-vs  # VirtualService 이름
+            routes:
+            - primary  # Gateway의 route 이름과 일치해야 함
+          destinationRule:
+            name: main-backend-dr  # DestinationRule 이름
+            canarySubsetName: canary  # Canary 서브셋 이름
+            stableSubsetName: stable  # Stable 서브셋 이름
+      
+      # Canary 배포 단계 정의
+      steps:
+      # 1단계: 10% 트래픽을 canary로 라우팅, 30초 대기
+      - setWeight: 10
+      - pause:
+          duration: 30s
+      
+      # 2단계: 25% 트래픽으로 증가, 1분 대기
+      - setWeight: 25
+      - pause:
+          duration: 1m
+      
+      # 3단계: 50% 트래픽으로 증가, 2분 대기
+      - setWeight: 50
+      - pause:
+          duration: 2m
+      
+      # 4단계: 100% 트래픽으로 전환 (자동 완료)
+      - setWeight: 100
+      
+      # 분석(Analysis) 설정 (선택사항)
+      # 메트릭 기반 자동 승인/롤백
+      analysis:
+        templates:
+        - templateName: success-rate
+        startingStep: 2  # 2단계부터 분석 시작
+        args:
+        - name: service-name
+          value: main-backend
+---
+# Service는 기존과 동일하게 유지
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: main-backend
+  ports:
+  - port: 3000
+    targetPort: 3000
+    protocol: TCP
+    name: http-main
+  type: ClusterIP
+---
+# DestinationRule: Istio 서브셋 정의
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: main-backend-dr
+  namespace: apc-be-ns
+spec:
+  host: main-backend  # Service 이름과 일치
+  subsets:
+  - name: stable
+    labels:
+      app: main-backend
+      version: stable
+  - name: canary
+    labels:
+      app: main-backend
+      version: canary
+---
+# VirtualService: Argo Rollouts가 자동으로 관리하지만,
+# 초기 생성 또는 수동 관리가 필요한 경우 아래와 같이 정의 가능
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: main-backend-vs
+  namespace: apc-be-ns
+spec:
+  hosts:
+  - main-backend  # Service 이름
+  gateways:
+  - alphacar-gateway  # Istio Gateway 이름
+  http:
+  - name: primary
+    match:
+    - uri:
+        prefix: /api/main  # 실제 경로에 맞게 수정
+    route:
+    - destination:
+        host: main-backend
+        subset: stable
+      weight: 100
+    - destination:
+        host: main-backend
+        subset: canary
+      weight: 0
+

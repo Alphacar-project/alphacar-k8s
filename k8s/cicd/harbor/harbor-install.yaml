@@ -1,0 +1,186 @@
+# Harbor Database
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harbor-db
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: harbor-db
+  template:
+    metadata:
+      labels:
+        app: harbor-db
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:13
+        env:
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "root123"
+        - name: POSTGRES_DB
+          value: "registry"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: db-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: harbor-db
+  namespace: apc-cicd-ns
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: harbor-db
+---
+# Harbor Redis
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harbor-redis
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: harbor-redis
+  template:
+    metadata:
+      labels:
+        app: harbor-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: harbor-redis
+  namespace: apc-cicd-ns
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: harbor-redis
+---
+# Harbor Core ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-core-config
+  namespace: apc-cicd-ns
+data:
+  app.conf: |
+    appname = Harbor
+    runmode = dev
+    enablexsrf = true
+    xsrfkey = 6a8bgr43E2p8972ec0b5a3d1d529b2ee
+    xsrfexpire = 3600
+    [cache]
+    type=redis
+    redis_host=harbor-redis:6379
+    redis_password=
+    redis_db_index=0
+    [database]
+    type = postgres
+    host = harbor-db
+    port = 5432
+    user = postgres
+    password = root123
+    dbname = registry
+---
+# Harbor Core Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harbor
+  namespace: apc-cicd-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: harbor
+  template:
+    metadata:
+      labels:
+        app: harbor
+    spec:
+      containers:
+      - name: harbor
+        image: goharbor/harbor-core:v2.10.0
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: CONFIG_PATH
+          value: "/etc/harbor/app.conf"
+        - name: DATABASE_HOST
+          value: "harbor-db"
+        - name: POSTGRES_PASSWORD
+          value: "root123"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "registry"
+        - name: REDIS_HOST
+          value: "harbor-redis:6379"
+        - name: CACHE_TYPE
+          value: "redis"
+        - name: REDIS_PASSWORD
+          value: ""
+        - name: REDIS_DB_INDEX
+          value: "0"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/harbor/app.conf
+          subPath: app.conf
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: config-volume
+        configMap:
+          name: harbor-core-config
+---
+# Harbor Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: harbor
+  namespace: apc-cicd-ns
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30000
+  selector:
+    app: harbor

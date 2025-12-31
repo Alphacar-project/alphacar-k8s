@@ -1,0 +1,152 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACTION',
+               choices: ['build_and_deploy', 'skip_build'],
+               description: 'alphacar-search 빌드 및 배포를 진행하시겠습니까?')
+        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
+    }
+
+    environment {
+        ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
+        AWS_REGION = 'ap-northeast-2'
+        IMAGE_NAME = 'alphacar/alphacar-search'
+        APP_NAME = 'search'
+        GIT_CREDENTIAL_ID = 'github-cred'
+        SONARQUBE_NAME = 'SonarQube'
+        SONAR_HOST_URL = 'http://192.168.0.170:32000'
+        MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+    }
+
+    stages {
+        stage('1. Prepare') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                cleanWs()
+                checkout scm
+                script {
+                    // 디스크 공간 확보를 위한 Docker 리소스 정리
+                    sh '''
+                        echo "🧹 빌드 전 Docker 리소스 정리 중..."
+                        docker image prune -f || true
+                        docker container prune -f || true
+                        docker builder prune -f || true
+                        echo "✅ Docker 리소스 정리 완료"
+                    '''
+                    
+                    def baseVer = "1.0"
+                    def versionPath = 'dev/alphacar/backend/version.txt'
+                    if (fileExists(versionPath)) {
+                        baseVer = readFile(versionPath).trim()
+                    }
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    
+                    sh '''
+                        if ! command -v trivy &> /dev/null; then
+                            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('2. Security & Analysis') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def scannerHome = tool name: 'sonar-scanner'
+                    dir('dev/alphacar/backend') {
+                        // SonarQube 분석
+                        withSonarQubeEnv('sonarqube') {
+                            sh "${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=alphacar-search \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=http://localhost:9000 \
+                                -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873"
+                        }
+                        echo "🛡️ 백엔드 소스 코드 취약점 스캔 중..."
+                        sh "/tmp/trivy fs --severity CRITICAL,HIGH --exit-code 0 ."
+                    }
+                }
+            }
+        }
+
+        stage('3. Docker Build & Push to ECR') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                    dir('dev/alphacar/backend') {
+                        sh "docker build --build-arg APP_NAME=${APP_NAME} --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
+                        
+                        // AWS ECR 로그인
+                        script {
+                            def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
+                            if (!awsPath || !fileExists(awsPath)) {
+                                error "AWS CLI not found. Please install AWS CLI on the Jenkins server."
+                            }
+                            sh """
+                                ${awsPath} ecr get-login-password --region ${AWS_REGION} | \\
+                                docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            """
+                        }
+                        
+                        sh "docker push ${imageFullTag}"
+                        sh "docker logout ${ECR_REGISTRY}"
+                    }
+                }
+            }
+        }
+
+        stage('4. Update Manifest') {
+            when { expression { params.ACTION == 'build_and_deploy' } }
+            steps {
+                script {
+                    dir('manifest-update') {
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+                        
+                        def yamlPath = "k8s/backend/search-backend.yaml"
+                        
+                        withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                            sh """
+                                # 브랜치 확인 및 전환
+                                git checkout -B main || git checkout main
+                                
+                                if [ -f "${yamlPath}" ]; then
+                                    sed -i 's|image: .*/alphacar-search:.*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${yamlPath}
+                                    echo "✅ 매니페스트 업데이트 완료: ${yamlPath}"
+                                fi
+                                
+                                git config user.email "jenkins@alphacar.com"
+                                git config user.name "Jenkins-CI"
+                                git add .
+                                if [ -n "\$(git status --porcelain)" ]; then
+                                    git commit -m "Update alphacar-search image to ${env.FULL_VERSION} [skip ci]"
+                                    git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                    echo "✅ GitOps 레포지토리 푸시 성공"
+                                fi
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh """
+                docker image prune -f || true
+                docker container prune -f || true
+                docker builder prune -f || true
+            """
+            cleanWs()
+        }
+    }
+}
+

@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-analysis-backend
+  namespace: apc-obsv-ns  # 모니터링 네임스페이스에 배포 (필요시 변경)
+  labels:
+    app: monitoring-analysis-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-analysis-backend
+  template:
+    metadata:
+      labels:
+        app: monitoring-analysis-backend
+    spec:
+      serviceAccountName: monitoring-analysis-sa
+      containers:
+      - name: backend
+        # [중요] 아래 이미지 이름을 실제로 빌드해서 푸시한 이미지 이름으로 바꾸세요!
+        # 예: docker.io/my-id/analysis-backend:latest
+        image: 192.168.0.170:30000/aiobsv/monitoring-analysis-backend@sha256:c8ac16049159b0028a07041b2d23945ec836de2a2b7115725cb6bccdcf36934b 
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: monitoring-analysis-config
+        - secretRef:
+            name: monitoring-analysis-secret
+        env:
+        - name: PORT
+          value: "5000"
+        - name: NODE_ENV
+          value: "production"
+        - name: AWS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: region
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: access_key_id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: secret_access_key
+        - name: BEDROCK_LLM_MODEL_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: llm_model_id
+        - name: BEDROCK_GUARDRAIL_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: guardrail_id
+        - name: BEDROCK_GUARDRAIL_VERSION
+          valueFrom:
+            secretKeyRef:
+              name: aws-bedrock-secret
+              key: guardrail_version
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+        # Dockerfile에 있던 헬스체크를 쿠버네티스 방식으로 변환
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10

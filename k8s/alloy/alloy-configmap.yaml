@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: apc-obsv-ns
+data:
+  config.alloy: |
+    // Alloy 설정 파일 - Kubernetes 클러스터 내부 구조용
+    // 내부 Prometheus/Loki/Tempo 서비스로 데이터 전송
+
+    // 1. Prometheus Remote Write (내부 주소로 변경)
+    prometheus.remote_write "prometheus" {
+      endpoint {
+        url = "http://prometheus.alphacar-obsv-ns.svc.cluster.local:9090/api/v1/write"
+      }
+    }
+
+    // 2. Loki Write (내부 주소로 변경)
+    loki.write "loki" {
+      endpoint {
+        url = "http://loki.alphacar-obsv-ns.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
+
+    // 3. Tempo (Trace) Exporter (내부 주소로 변경)
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "tempo.alphacar-obsv-ns.svc.cluster.local:4317"
+        tls {
+          insecure = true
+        }
+      }
+    }
+
+    // ============================================
+    // 메트릭 수집 (서비스별 - FQDN 주소 사용)
+    // ============================================
+
+    prometheus.scrape "main_backend" {
+      targets = [ {"__address__" = "main-backend.apc-be-ns.svc.cluster.local:3002", "job" = "main-backend", "service" = "main"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "quote_backend" {
+      targets = [ {"__address__" = "quote-backend.apc-be-ns.svc.cluster.local:3003", "job" = "quote-backend", "service" = "quote"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "community_backend" {
+      targets = [ {"__address__" = "community-backend.apc-be-ns.svc.cluster.local:3005", "job" = "community-backend", "service" = "community"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "news_backend" {
+      targets = [ {"__address__" = "news-backend.apc-be-ns.svc.cluster.local:3008", "job" = "news-backend", "service" = "news"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "mypage_backend" {
+      targets = [ {"__address__" = "mypage-backend.apc-be-ns.svc.cluster.local:3006", "job" = "mypage-backend", "service" = "mypage"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "aichat_backend" {
+      targets = [ {"__address__" = "aichat-backend.apc-be-ns.svc.cluster.local:4000", "job" = "aichat-backend", "service" = "aichat"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    prometheus.scrape "search_backend" {
+      targets = [ {"__address__" = "search-backend.apc-be-ns.svc.cluster.local:3007", "job" = "search-backend", "service" = "search"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+
+    // ============================================
+    // 트레이스 수집 - OTLP
+    // ============================================
+
+    otelcol.receiver.otlp "traces" {
+      grpc { endpoint = "0.0.0.0:4317" }
+      http { endpoint = "0.0.0.0:4318" }
+      output {
+        traces = [otelcol.exporter.otlp.tempo.input]
+      }
+    }

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alphacar-be-config
+  namespace: apc-be-ns
+data:
+  # [수정] 실제 DB 서비스 이름(mongodb)과 네임스페이스(apc-db-ns) 반영
+  MONGO_HOST: "mongodb.apc-db-ns.svc.cluster.local"
+  MONGO_PORT: "27017"
+  
+  # [주의] MariaDB와 Redis도 실제 서비스 이름이 alphacar-maria/redis가 맞는지 확인 필요
+  # 만약 이름이 다르다면 아래 주소도 mongodb처럼 실제 이름으로 고쳐야 합니다.
+  MARIADB_HOST: "alphacar-maria.apc-db-ns.svc.cluster.local"
+  MARIADB_PORT: "3306"
+  REDIS_HOST: "alphacar-redis.apc-db-ns.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+  # 관측성 설정 (주소 유지)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-alloy.apc-obsv-ns.svc.cluster.local:4317"
+
+  # AWS/AI 설정 (주소 유지)
+  AWS_REGION: "us-east-1"
+  BEDROCK_GUARDRAIL_ID: "nfdfeln14bg7"
+  BEDROCK_GUARDRAIL_VERSION: "DRAFT"
+  BEDROCK_EMBEDDING_MODEL_ID: "amazon.titan-embed-text-v2:0"
+  BEDROCK_LLM_MODEL_ID: "meta.llama3-3-70b-instruct-v1:0"

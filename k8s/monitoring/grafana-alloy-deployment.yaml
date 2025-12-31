@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alloy-config
+  namespace: apc-obsv-ns
+data:
+  config.alloy: |
+    // Grafana Alloy 설정 - Kubernetes 내부 모니터링 수집
+    
+    // 1. Prometheus Remote Write
+    prometheus.remote_write "prometheus" {
+      endpoint {
+        url = "http://prometheus:9090/api/v1/write"
+      }
+    }
+    
+    // 2. Loki Write
+    loki.write "loki" {
+      endpoint {
+        url = "http://loki:3100/loki/api/v1/push"
+      }
+    }
+    
+    // 3. Tempo (Trace) Exporter
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "tempo:4317"
+        tls {
+          insecure = true
+        }
+      }
+    }
+    
+    // ============================================
+    // 메트릭 수집 (서비스별)
+    // ============================================
+    
+    prometheus.scrape "main_backend" {
+      targets = [ {"__address__" = "main-backend.alphacar.svc.cluster.local:3002", "job" = "main-backend", "service" = "main"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "quote_backend" {
+      targets = [ {"__address__" = "quote-backend.alphacar.svc.cluster.local:3003", "job" = "quote-backend", "service" = "quote"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "community_backend" {
+      targets = [ {"__address__" = "community-backend.alphacar.svc.cluster.local:3005", "job" = "community-backend", "service" = "community"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "drive_backend" {
+      targets = [ {"__address__" = "drive-backend.alphacar.svc.cluster.local:3008", "job" = "drive-backend", "service" = "drive"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "mypage_backend" {
+      targets = [ {"__address__" = "mypage-backend.alphacar.svc.cluster.local:3006", "job" = "mypage-backend", "service" = "mypage"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "aichat_backend" {
+      targets = [ {"__address__" = "aichat-backend.alphacar.svc.cluster.local:4000", "job" = "aichat-backend", "service" = "aichat"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    prometheus.scrape "search_backend" {
+      targets = [ {"__address__" = "search-backend.alphacar.svc.cluster.local:3007", "job" = "search-backend", "service" = "search"} ]
+      forward_to = [prometheus.remote_write.prometheus.receiver]
+      scrape_interval = "15s"
+      metrics_path = "/metrics"
+    }
+    
+    // ============================================
+    // 트레이스 수집 - OTLP
+    // ============================================
+    
+    otelcol.receiver.otlp "traces" {
+      grpc { endpoint = "0.0.0.0:4317" }
+      http { endpoint = "0.0.0.0:4318" }
+      output {
+        traces = [otelcol.exporter.otlp.tempo.input]
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-alloy
+  namespace: apc-obsv-ns
+  labels:
+    app: grafana-alloy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana-alloy
+  template:
+    metadata:
+      labels:
+        app: grafana-alloy
+    spec:
+      containers:
+      - name: alloy
+        image: grafana/alloy:latest
+        ports:
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        - containerPort: 12345
+          name: http
+        args:
+        - run
+        - --server.http.listen-addr=0.0.0.0:12345
+        - --storage.path=/var/lib/alloy/data
+        - /etc/alloy/config.alloy
+        volumeMounts:
+        - name: alloy-config
+          mountPath: /etc/alloy/config.alloy
+          subPath: config.alloy
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: alloy-config
+        configMap:
+          name: grafana-alloy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-alloy
+  namespace: apc-obsv-ns
+  labels:
+    app: grafana-alloy
+spec:
+  selector:
+    app: grafana-alloy
+  ports:
+  - port: 4317
+    targetPort: 4317
+    protocol: TCP
+    name: otlp-grpc
+  - port: 4318
+    targetPort: 4318
+    protocol: TCP
+    name: otlp-http
+  - port: 12345
+    targetPort: 12345
+    protocol: TCP
+    name: http
+  type: ClusterIP
+

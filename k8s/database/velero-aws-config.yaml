@@ -1,0 +1,59 @@
+# Velero AWS 설정을 위한 ConfigMap과 Secret
+# 실제 값은 별도로 설정해야 합니다.
+
+---
+# AWS S3 설정 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-aws-config
+  namespace: apc-backup-ns
+  labels:
+    app: velero
+data:
+  # S3 버킷 설정
+  S3_BUCKET: "velero-backups"
+  S3_PREFIX: "apc-backup"
+  S3_REGION: "us-east-1"
+  S3_FORCE_PATH_STYLE: "false"
+  
+  # 백업 설정
+  BACKUP_TTL_MONGODB: "720h"  # 30일
+  BACKUP_TTL_KAFKA: "720h"    # 30일
+  BACKUP_TTL_FULL: "2160h"    # 90일
+  
+  # 백업 스케줄
+  SCHEDULE_MONGODB: "0 2 * * *"  # 매일 오전 2시
+  SCHEDULE_KAFKA: "0 3 * * *"    # 매일 오전 3시
+  SCHEDULE_FULL: "0 1 * * 0"     # 매주 일요일 오전 1시
+
+---
+# AWS 자격증명 Secret
+# 주의: 실제 값은 별도로 설정해야 합니다.
+# 생성 방법:
+#   kubectl create secret generic cloud-credentials \
+#     --namespace apc-backup-ns \
+#     --from-file=cloud=~/.aws/credentials \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# 또는:
+#   kubectl create secret generic cloud-credentials \
+#     --namespace apc-backup-ns \
+#     --from-literal=AWS_ACCESS_KEY_ID=your-access-key \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=your-secret-key
+#
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloud-credentials
+  namespace: apc-backup-ns
+  labels:
+    app: velero
+type: Opaque
+# data:
+#   cloud: <base64-encoded-aws-credentials>
+#   AWS_ACCESS_KEY_ID: <base64-encoded-access-key>
+#   AWS_SECRET_ACCESS_KEY: <base64-encoded-secret-key>
+
+
+

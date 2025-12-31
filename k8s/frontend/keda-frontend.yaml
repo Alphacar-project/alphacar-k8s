@@ -1,0 +1,15 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: frontend-scaler
+  namespace: apc-fe-ns  # 프론트엔드 네임스페이스
+spec:
+  scaleTargetRef:
+    name: frontend      # Deployment 이름
+  minReplicaCount: 1    # 최소 2개 유지 (안정성)
+  maxReplicaCount: 10   # 최대 10개까지 확장
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"     # CPU 60% 도달 시 확장

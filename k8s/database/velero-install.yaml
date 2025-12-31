@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: apc-backup-ns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: velero
+  namespace: apc-backup-ns
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero
+  namespace: apc-backup-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: velero
+  template:
+    metadata:
+      labels:
+        app: velero
+    spec:
+      serviceAccountName: velero
+      containers:
+      - name: velero
+        image: velero/velero:v1.13.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - /velero
+        args:
+        - server
+        env:
+        - name: VELERO_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: VELERO_SCRATCH_DIR
+          value: /scratch
+        - name: AWS_CLI_TIMEOUT
+          value: "5m"
+        volumeMounts:
+        - name: plugins
+          mountPath: /plugins
+        - name: scratch
+          mountPath: /scratch
+        - name: cloud-credentials
+          mountPath: /credentials
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.9.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: plugins
+          mountPath: /target
+      volumes:
+      - name: plugins
+        emptyDir: {}
+      - name: scratch
+        emptyDir: {}
+      - name: cloud-credentials
+        secret:
+          secretName: cloud-credentials
+---
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: apc-backup-ns
+spec:
+  provider: aws
+  objectStorage:
+    bucket: mongodb-382045063773  # MongoDB 전용 버킷
+    prefix: backups               # 백업 파일 prefix
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "false"
+  credential:
+    name: cloud-credentials
+    key: cloud
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: mongodb-daily-backup
+  namespace: apc-backup-ns
+spec:
+  schedule: "0 2 * * *"
+  template:
+    includedNamespaces:
+    - apc-db-ns
+    includedResources:
+    - "*"
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    ttl: 720h0m0s
+    labelSelector:
+      matchLabels:
+        app: mongodb
+    # Longhorn 볼륨 백업을 위한 설정
+    snapshotVolumes: true
+    includeClusterResources: false
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: kafka-daily-backup
+  namespace: apc-backup-ns
+spec:
+  schedule: "0 3 * * *"
+  template:
+    includedNamespaces:
+    - apc-striming-ns
+    includedResources:
+    - "*"
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    ttl: 720h0m0s
+    labelSelector:
+      matchLabels:
+        strimzi.io/cluster: kafka-cluster
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: full-cluster-weekly-backup
+  namespace: apc-backup-ns
+spec:
+  schedule: "0 1 * * 0"
+  template:
+    includedNamespaces:
+    - apc-db-ns
+    - apc-striming-ns
+    - apc-backup-ns
+    includedResources:
+    - "*"
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    ttl: 2160h0m0s
+

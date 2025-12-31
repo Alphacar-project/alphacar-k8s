@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mypage-backend
+  namespace: apc-be-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: mypage-backend
+  template:
+    metadata:
+      labels:
+        app: mypage-backend
+    spec:
+      serviceAccountName: mypage-backend-sa
+      # ✅ EKS 노드 IAM Role 권한을 사용하므로 Harbor 시크릿은 제거했습니다.
+      containers:
+      - name: mypage-backend
+        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
+        # 빌드 및 푸시하신 버전에 맞춰 태그(1.0.1 등)를 지정하세요.
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-mypage:1.0.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3006
+          name: http
+        env:
+        - name: PORT
+          value: "3006"
+        - name: SERVICE_NAME
+          value: "mypage-backend"
+        # ✅ Google OAuth 등을 위한 베이스 URL 유지
+        - name: BASE_URL
+          value: "https://alphacar.cloud"
+
+        # [ConfigMap] apc-be-config 참조 유지
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: OTEL_EXPORTER_OTLP_ENDPOINT
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MONGO_PORT
+        - name: MARIADB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MARIADB_HOST
+        - name: MARIADB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: apc-be-config
+              key: MARIADB_PORT
+
+        # [Secret] apc-be-secret 참조 유지
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_USER
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_PASS
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MONGO_DB_NAME
+        - name: MARIADB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_USER
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_PASS
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: MARIADB_DB_NAME
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: apc-be-secret
+              key: JWT_SECRET
+
+        # ✅ Global Prefix('api') 반영에 따른 헬스체크 경로 수정
+        livenessProbe:
+          httpGet:
+            path: /api
+            port: 3006
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api
+            port: 3006
+          initialDelaySeconds: 15
+          periodSeconds: 5
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mypage-backend
+  namespace: apc-be-ns
+spec:
+  selector:
+    app: mypage-backend
+  ports:
+  - name: http
+    port: 3006
+    targetPort: 3006
+    protocol: TCP
+  # ALB Ingress를 통해 트래픽을 받으므로 ClusterIP 유지
+  type: ClusterIP
