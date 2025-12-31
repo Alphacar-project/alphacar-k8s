@@ -9,27 +9,28 @@ const nextConfig = {
       // [우선순위 최상단] MAIN SERVICE - 직접 경로
       // 클라이언트 사이드 API 호출을 위해 /main, /brands 등을 먼저 처리
       // ----------------------------------------------------
-      {
-        source: '/main/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/main/:path*',
-      },
-      {
-        source: '/brands',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/brands',
-      },
-      {
-        source: '/sales/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/sales/:path*',
-      },
+      // 클라이언트 사이드 직접 호출용 (Next.js API 프록시 사용 권장)
+      // {
+      //   source: '/main/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/main/:path*',
+      // },
+      // {
+      //   source: '/brands',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/brands',
+      // },
+      // {
+      //   source: '/sales/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/sales/:path*',
+      // },
 
       // ----------------------------------------------------
       // [AI CHAT SERVICE] - Traefik을 통해 4000번 포트로 연결
       // ----------------------------------------------------
-      {
-        source: '/api/chat/:path*',
-        // Traefik의 /api/chat 라우팅 규칙에 매칭되도록 보냄
-        destination: 'http://traefik:9090/api/chat/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/chat/:path*',
+      //   destination: 'http://traefik:9090/api/chat/:path*',
+      // },
 
       // ----------------------------------------------------
       // ★ [MAIN SERVICE] (차량 상세 정보)
@@ -37,11 +38,11 @@ const nextConfig = {
       
 
       // 1. [차량 상세 정보]
-      {
-        source: '/api/vehicles/detail',
-        // Traefik의 /api/vehicles/detail 라우팅 규칙 매칭
-        destination: 'http://traefik:9090/api/vehicles/detail',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/vehicles/detail',
+      //   destination: 'http://traefik:9090/api/vehicles/detail',
+      // },
       
       // [견적 페이지용] /api/vehicles/* → Istio VirtualService에서 처리
       // {
@@ -66,16 +67,18 @@ const nextConfig = {
       // ----------------------------------------------------
 
       // 2. [나머지 차량 관련]
-      {
-        source: '/api/vehicles/:path*',
-        destination: 'http://traefik:9090/api/vehicles/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/vehicles/:path*',
+      //   destination: 'http://traefik:9090/api/vehicles/:path*',
+      // },
 
       // 2. [견적 저장 및 목록]
-      {
-        source: '/api/estimate/:path*',
-        destination: 'http://traefik:9090/api/estimate/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/estimate/:path*',
+      //   destination: 'http://traefik:9090/api/estimate/:path*',
+      // },
 
       // ✅ 3. [최근 본 차량 (History)] - Istio VirtualService에서 처리
       // {
@@ -84,10 +87,11 @@ const nextConfig = {
       // },
 
       // 3. [이전 API 호환성 확보]
-      {
-        source: '/api/quote/:path*',
-        destination: 'http://traefik:9090/api/quote/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/quote/:path*',
+      //   destination: 'http://traefik:9090/api/quote/:path*',
+      // },
 
       // ----------------------------------------------------
       // [MAIN SERVICE - 일반 데이터]
@@ -96,48 +100,53 @@ const nextConfig = {
       // ----------------------------------------------------
 
       // 4. [메인 데이터 처리 - API 경로]
-      // /api/main도 지원 (기존 호환성)
-      {
-        source: '/api/main/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/main/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/main/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/main/:path*',
+      // },
 
       // 4-1. [브랜드 목록 - API 경로]
-      // /api/brands도 지원 (기존 호환성)
-      {
-        source: '/api/brands',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/brands',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/brands',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/brands',
+      // },
 
       // 4-2. [판매 순위]
-      {
-        source: '/api/sales/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/sales/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/sales/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/sales/:path*',
+      // },
 
       // 5. [최근 본 차량 (History)]
-      {
-        source: '/api/history/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/history/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/history/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/history/:path*',
+      // },
 
       // 5-1. [찜하기 기능]
-      {
-        source: '/api/favorites/:path*',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/favorites/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/favorites/:path*',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/favorites/:path*',
+      // },
 
       // 5-2. [최근 본 차량]
-      {
-        source: '/api/recent-views',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/recent-views',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/recent-views',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/recent-views',
+      // },
 
       // 5-3. [리뷰 분석]
-      {
-        source: '/api/review-analysis',
-        destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/review-analysis',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거
+      // {
+      //   source: '/api/review-analysis',
+      //   destination: 'http://main-backend.apc-be-ns.svc.cluster.local:3002/api/review-analysis',
+      // },
 
       // ----------------------------------------------------
       // [OTHER SERVICES]
@@ -162,10 +171,11 @@ const nextConfig = {
       // },
       
       // 8. [검색]
-      {
-        source: '/api/search/:path*',
-        destination: 'http://traefik:9090/api/search/:path*',
-      },
+      // Next.js API 프록시가 처리하므로 rewrites 제거 (app/api/[...path]/route.ts에서 처리)
+      // {
+      //   source: '/api/search/:path*',
+      //   destination: 'http://traefik:9090/api/search/:path*',
+      // },
     ];
   },
 };

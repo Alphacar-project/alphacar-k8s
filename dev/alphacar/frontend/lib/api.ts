@@ -146,12 +146,14 @@ export type CommunityListResponse = { message: string; posts: CommunityPost[] };
 export type CommunityWriteResponse = { success: boolean; message: string };
 
 export async function fetchCommunityPosts(): Promise<CommunityListResponse> {
-  const { data } = await api.get<CommunityListResponse>('/community');
+  // ✅ /api/community로 호출 (Next.js API 프록시 경유)
+  const { data } = await api.get<CommunityListResponse>('/api/community');
   return data;
 }
 
 export async function createCommunityPost(postData: Partial<CommunityPost>): Promise<CommunityWriteResponse> {
-  const { data } = await api.post<CommunityWriteResponse>('/community/write', postData);
+  // ✅ /api/community/write로 호출 (Next.js API 프록시 경유)
+  const { data } = await api.post<CommunityWriteResponse>('/api/community/write', postData);
   return data;
 }
 

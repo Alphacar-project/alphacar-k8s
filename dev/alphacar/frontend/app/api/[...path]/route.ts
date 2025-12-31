@@ -58,6 +58,12 @@ const getBackendUrl = (path: string): string | null => {
     return `http://search-backend.apc-be-ns.svc.cluster.local:3007/api/${path}`;
   }
 
+  // Community Backend (포트 3005)
+  // 백엔드가 setGlobalPrefix('api')를 사용하므로 /api prefix 추가
+  if (path.startsWith('community')) {
+    return `http://community-backend.apc-be-ns.svc.cluster.local:3005/api/${path}`;
+  }
+
   // News Backend (포트 3008)
   // 백엔드가 setGlobalPrefix('api')를 사용하고, 컨트롤러는 @Controller('drive')를 사용하므로 /api/drive로 변환
   if (path.startsWith('news')) {
