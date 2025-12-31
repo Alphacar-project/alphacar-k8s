@@ -23,7 +23,7 @@ spec:
       - name: harbor-registry-secret
       containers:
       - name: main-backend
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-main:1.0.0.18-21287cc
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-main:1.0.0.19-a3cd0b8
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
