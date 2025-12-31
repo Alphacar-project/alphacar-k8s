@@ -170,7 +170,7 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
     // 리뷰 분석 데이터 가져오기
     if (carName) {
       setReviewLoading(true);
-      fetch(`/review-analysis?vehicleName=${encodeURIComponent(carName)}`) // VirtualService 직접 경로
+      fetch(`/api/review-analysis?vehicleName=${encodeURIComponent(carName)}`) // VirtualService 직접 경로
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP error! status: ${res.status}`);
