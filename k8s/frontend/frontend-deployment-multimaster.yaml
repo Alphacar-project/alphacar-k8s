@@ -17,12 +17,7 @@ spec:
       serviceAccountName: frontend-sa
       containers:
       - name: frontend
- HEAD
-        # 최신 이미지 태그 1.0.0.9-35faab1 반영
         image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.0.0.9-35faab1
-
- f3970b73b1ac2180ca8e5b0973ab96520cd295ad
- f4137f3ccad1771feae1723140b85127517a0de6
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -80,5 +75,4 @@ spec:
     targetPort: 8000
     protocol: TCP
     name: http-web
-  # 기존 ALB 연동을 위한 NodePort 유지
   type: NodePort
