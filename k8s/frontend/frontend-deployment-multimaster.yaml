@@ -17,12 +17,8 @@ spec:
       serviceAccountName: frontend-sa
       containers:
       - name: frontend
-HEAD
-        # 핵심 수정: ECR에 올라간 최신 이미지 태그로 변경
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.0.0.4-f035742
-
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.0.0.5-e50e058
- f3970b73b1ac2180ca8e5b0973ab96520cd295ad
+        # 최신 이미지 태그 1.0.0.9-35faab1 반영
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.0.0.9-35faab1
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -80,5 +76,5 @@ spec:
     targetPort: 8000
     protocol: TCP
     name: http-web
-  # 기존 ALB를 사용하기 위해 NodePort 유지
+  # 기존 ALB 연동을 위한 NodePort 유지
   type: NodePort
