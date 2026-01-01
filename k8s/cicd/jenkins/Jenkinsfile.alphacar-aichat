@@ -46,7 +46,7 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    dir('dev/alphacar/backend') {
+                    dir('dev/alphacar/backend/aichat') {
                         // SonarQube 분석
                         withSonarQubeEnv('sonarqube') {
                             sh "${scannerHome}/bin/sonar-scanner \
@@ -64,7 +64,7 @@ pipeline {
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
-                    dir('dev/alphacar/backend') {
+                    dir('dev/alphacar/backend/aichat') {
                         sh "docker build --build-arg APP_NAME=${APP_NAME} --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
                         // AWS ECR 로그인
                         script {
