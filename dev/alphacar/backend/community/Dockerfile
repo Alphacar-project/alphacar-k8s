@@ -1,5 +1,6 @@
 # 1단계: 빌드 스테이지
 FROM node:20-alpine AS builder
+# 테스트: community 필터 테스트 (2024-01-02)
 # 테스트: Jenkins 필터 확인용 주석 (2024-01-01)
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
