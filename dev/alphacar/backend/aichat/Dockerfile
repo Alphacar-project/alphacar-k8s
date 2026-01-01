@@ -1,5 +1,6 @@
 # glibc 기반 이미지 사용 (Alpine 대신)
 FROM node:20-slim
+# 테스트: Jenkins 파이프라인 확인용 (2024-01-01)
 
 # 필요한 시스템 라이브러리 설치
 RUN apt-get update && apt-get install -y \
