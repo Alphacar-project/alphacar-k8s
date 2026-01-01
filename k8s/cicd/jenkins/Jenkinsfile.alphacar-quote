@@ -15,8 +15,7 @@ pipeline {
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
-        SKIP_BUILD = 'false'
-    }
+            }
     stages {
         stage('0. Check Changes') {
             when { expression { params.ACTION == 'build_and_deploy' } }
@@ -36,8 +35,7 @@ pipeline {
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         echo "커밋 메시지: ${commitMessage}"
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return due to [skip ci] commit")
                     }
@@ -54,8 +52,7 @@ pipeline {
                     
                     if (!changedFiles) {
                         echo "⚠️ 변경된 파일이 없습니다."
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return - no changes detected")
                     }
@@ -78,23 +75,18 @@ pipeline {
                     if (!quoteChanged) {
                         echo "⏭️ quote 경로 변경사항이 없습니다. 빌드를 스킵합니다."
                         echo "변경된 경로:\n${changedFiles}"
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return - no quote path changes")
                     }
                     
                     echo "✅ quote 변경사항 확인됨 - 빌드 진행"
-                    env.SKIP_BUILD = 'false'
-                }
+                    env.                }
             }
         }
         stage('1. Prepare') {
             when { 
-                allOf {
-                    expression { params.ACTION == 'build_and_deploy' }
-                    expression { env.SKIP_BUILD != 'true' }
-                }
+                expression { params.ACTION == 'build_and_deploy' }
             }
             steps {
                 script {
@@ -120,10 +112,7 @@ pipeline {
         }
         stage('2. Security & Analysis') {
             when { 
-                allOf {
-                    expression { params.ACTION == 'build_and_deploy' }
-                    expression { env.SKIP_BUILD != 'true' }
-                }
+                expression { params.ACTION == 'build_and_deploy' }
             }
             steps {
                 script {
@@ -143,10 +132,7 @@ pipeline {
         }
         stage('3. Docker Build & Push to ECR') {
             when { 
-                allOf {
-                    expression { params.ACTION == 'build_and_deploy' }
-                    expression { env.SKIP_BUILD != 'true' }
-                }
+                expression { params.ACTION == 'build_and_deploy' }
             }
             steps {
                 script {
@@ -172,10 +158,7 @@ pipeline {
         }
         stage('4. Update Manifest') {
             when { 
-                allOf {
-                    expression { params.ACTION == 'build_and_deploy' }
-                    expression { env.SKIP_BUILD != 'true' }
-                }
+                expression { params.ACTION == 'build_and_deploy' }
             }
             steps {
                 script {

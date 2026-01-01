@@ -15,8 +15,7 @@ pipeline {
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
-        SKIP_BUILD = 'false'
-    }
+            }
     stages {
         stage('0. Check Changes') {
             when { expression { params.ACTION == 'build_and_deploy' } }
@@ -27,16 +26,14 @@ pipeline {
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return due to [skip ci] commit")
                     }
                     def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
                     if (!changedFiles) {
                         echo "⚠️ 변경된 파일이 없습니다."
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return - no changes detected")
                     }
@@ -53,20 +50,46 @@ pipeline {
                     }
                     if (!communityChanged) {
                         echo "⏭️ community 경로 변경사항이 없습니다. 빌드를 스킵합니다."
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'SUCCESS'
+                                                currentBuild.result = 'SUCCESS'
                         return
                         return - no community path changes")
                     }
                     echo "✅ community 변경사항 확인됨 - 빌드 진행"
-                    env.SKIP_BUILD = 'false'
-                }
+                    env.                }
             }
         }
         stage('1. Prepare') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
-                cleanWs()
+                
+                    // 변경 감지 재확인
+                    checkout scm
+                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    if (commitMessage.contains('[skip ci]')) {
+                        echo "⏭️ [skip ci] 커밋 - 빌드 스킵"
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    if (!changedFiles) {
+                        echo "⏭️ 변경 없음 - 빌드 스킵"
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    def communityChanged = false
+                    changedFiles.split('
+').each { file ->
+                        if (file.trim().contains('dev/alphacar/backend/community')) {
+                            communityChanged = true
+                        }
+                    }
+                    if (!communityChanged) {
+                        echo "⏭️ community 경로 변경 없음 - 빌드 스킵"
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    cleanWs()
                 checkout scm
                 script {
                     sh '''
@@ -87,7 +110,7 @@ pipeline {
             }
         }
         stage('2. Security & Analysis') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
@@ -100,7 +123,7 @@ pipeline {
             }
         }
         stage('3. Docker Build & Push to ECR') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
@@ -123,7 +146,7 @@ pipeline {
             }
         }
         stage('4. Update Manifest') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     dir('manifest-update') {
