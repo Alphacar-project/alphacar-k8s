@@ -1,35 +1,31 @@
 pipeline {
     agent any
-    parameters {
-        choice(name: 'ACTION',
-               choices: ['build_and_deploy', 'skip_build'],
-               description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
-        string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
-        booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: 'SonarQube 분석 스킵 (타임아웃 발생 시 사용)')
-    }
+
     environment {
         ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
         AWS_REGION = 'ap-northeast-2'
         IMAGE_NAME = 'alphacar/frontend'
+        SERVICE_NAME = 'frontend'
+
+        // Argo CD 매니페스트 저장소
+        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
+
         GIT_CREDENTIAL_ID = 'github-cred'
-        SONARQUBE_NAME = 'SonarQube'
-        SONAR_HOST_URL = 'http://192.168.0.170:32000'
-        MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
     }
+
     stages {
-        stage('1. Prepare') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+        stage('0. Check Changes') {
             steps {
                 script {
                     cleanWs()
                     checkout scm
                     
-                    // 변경 감지
                     echo "🔍 변경된 파일 확인 중..."
+                    
+                    // [skip ci] 커밋 체크
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     echo "커밋 메시지: ${commitMessage}"
                     
-                    // [skip ci] 커밋 체크
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         currentBuild.result = 'SUCCESS'
@@ -37,18 +33,18 @@ pipeline {
                         return
                     }
                     
-                    // 최근 커밋의 변경 파일 확인
+                    // 변경 파일 확인
                     def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
-                    echo "변경된 파일 (HEAD~1 vs HEAD):\n${changedFiles}"
                     
                     // 변경 파일이 없으면 최근 2개 커밋 비교
                     if (!changedFiles || changedFiles.trim().isEmpty()) {
                         def recentCommits = sh(script: 'git log -2 --pretty=%H', returnStdout: true).trim().split('\n')
                         if (recentCommits.size() >= 2) {
                             changedFiles = sh(script: "git diff --name-only ${recentCommits[1]} ${recentCommits[0]} 2>/dev/null || echo \"\"", returnStdout: true).trim()
-                            echo "변경된 파일 (최근 2개 커밋 비교):\n${changedFiles}"
                         }
                     }
+                    
+                    echo "변경된 파일:\n${changedFiles}"
                     
                     if (!changedFiles || changedFiles.trim().isEmpty()) {
                         echo "⚠️ 변경된 파일이 없습니다."
@@ -57,22 +53,30 @@ pipeline {
                         return
                     }
                     
-                    // frontend 경로 변경 확인
-                    def frontendChanged = false
+                    // Jenkinsfile 변경 무시
                     def fileList = changedFiles.split('\n')
+                    def jenkinsfileOnly = true
+                    def frontendChanged = false
+                    
                     for (file in fileList) {
                         file = file.trim()
-                        // Jenkinsfile 변경은 무시
-                        if (file.contains('Jenkinsfile')) {
-                            echo "Jenkinsfile 변경 무시: ${file}"
+                        if (file.contains('Jenkinsfile') && !file.contains('dev/alphacar/frontend')) {
                             continue
                         }
-                        // frontend 경로 확인
-                        if (file && file.contains('dev/alphacar/frontend')) {
+                        if (file.contains('dev/alphacar/frontend')) {
                             frontendChanged = true
+                            jenkinsfileOnly = false
                             echo "✅ frontend 관련 변경 감지: ${file}"
                             break
                         }
+                        jenkinsfileOnly = false
+                    }
+                    
+                    if (jenkinsfileOnly) {
+                        echo "⏭️ Jenkinsfile만 변경됨 - 빌드 스킵"
+                        currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - Jenkinsfile only)"
+                        return
                     }
                     
                     if (!frontendChanged) {
@@ -84,15 +88,17 @@ pipeline {
                     }
                     
                     echo "✅ frontend 변경사항 확인됨 - 빌드 진행"
+                }
+            }
+        }
+
+        stage('1. Prepare & SonarQube') {
+            steps {
+                script {
+                    // 이미지 태그용 Git SHA 추출
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     
-                    // 디스크 공간 확보를 위한 Docker 리소스 정리
-                    sh '''
-                        echo "🧹 빌드 전 Docker 리소스 정리 중..."
-                        docker image prune -f || true
-                        docker container prune -f || true
-                        docker builder prune -f || true
-                        echo "✅ Docker 리소스 정리 완료"
-                    '''
+                    // 버전 정보 설정
                     def baseVer = "1.0"
                     def versionPath = 'dev/alphacar/frontend/version.txt'
                     try {
@@ -102,51 +108,34 @@ pipeline {
                     } catch (e) {
                         echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
                     }
-                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
+                    
+                    def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    env.PATH = "${sonarPath}/bin:${env.PATH}"
                 }
-            }
-        }
-        stage('2. Security & Quality Analysis') {
-            when { 
-                allOf {
-                    expression { params.ACTION == 'build_and_deploy' }
-                    expression { !params.SKIP_SONAR }
-                }
-            }
-            steps {
-                script {
-                    def scannerHome = tool name: 'sonar-scanner'
-                    dir('dev/alphacar/frontend') {
-                        timeout(time: 30, unit: 'MINUTES') {
-                            withEnv(["SONAR_SCANNER_OPTS=-Xmx2048m -Xms512m"]) {
-                                withSonarQubeEnv('sonarqube') {
-                                    sh """
-                                        ${scannerHome}/bin/sonar-scanner \
-                                        -Dsonar.projectKey=alphacar-frontend \
-                                        -Dsonar.sources=. \
-                                        -Dsonar.host.url=http://localhost:9000 \
-                                        -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 \
-                                        -Dsonar.scanner.socketTimeout=1800 \
-                                        -Dsonar.scanner.connectTimeout=600 \
-                                        -Dsonar.analysis.mode=publish
-                                    """
-                                }
-                            }
-                        }
+                // 프론트엔드 폴더로 이동하여 소나큐브 스캔
+                dir('dev/alphacar/frontend') {
+                    withSonarQubeEnv('sonarqube') {
+                        sh "sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000"
                     }
                 }
             }
         }
-        stage('3. Docker Build & Push to ECR') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+
+        stage('2. Build & Push to ECR') {
             steps {
                 script {
-                    def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
-                    echo "🐳 도커 빌드 시작: ${imageFullTag}"
+                    echo "🔨 프론트엔드 빌드 시작 (경로: dev/alphacar/frontend)"
+
+                    // Dockerfile이 있는 실제 경로로 이동하여 빌드 및 푸시
                     dir('dev/alphacar/frontend') {
+                        def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                        echo "🐳 도커 빌드 시작: ${imageFullTag}"
+                        
                         sh "docker build -f Dockerfile -t ${imageFullTag} ."
+
+                        // AWS ECR 로그인
                         script {
                             def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
                             if (!awsPath || !fileExists(awsPath)) {
@@ -157,37 +146,58 @@ pipeline {
                                 docker login --username AWS --password-stdin ${ECR_REGISTRY}
                             """
                         }
+                        
                         sh "docker push ${imageFullTag}"
                         sh "docker logout ${ECR_REGISTRY}"
+                        
+                        echo "✅ ECR 푸시 완료: ${imageFullTag}"
                     }
                 }
             }
         }
-        stage('4. Update Manifest (GitOps)') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+
+        stage('3. Update Manifests (GitOps)') {
             steps {
                 script {
+                    echo "🚀 [GitOps] 프론트엔드 Manifest 업데이트 시작"
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]])
-                        withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        // 저장소 클론 (main 브랜치 명시 및 Detached HEAD 방지)
+                        checkout([$class: 'GitSCM',
+                            branches: [[name: 'main']],
+                            extensions: [[$class: 'LocalBranch', localBranch: 'main']],
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
+
+                        // Argo CD 저장소 내 프론트엔드 YAML 경로
+                        def yamlPath = "k8s/frontend/${env.SERVICE_NAME}-deployment.yaml"
+                        def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+
+                        // 1. 파일 수정 및 로컬 커밋
+                        withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
                             sh """
-                                git checkout -B main || git checkout main
-                                TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
-                                if [ -f "\$TARGET_FILE" ]; then
-                                    echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
-                                    sed -i "s|image: .*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
+                                if [ -f "${yamlPath}" ]; then
+                                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
+                                    
+                                    # ECR 이미지 경로로 업데이트 (기존 경로 무시하고 강제 교체)
+                                    sed -i 's|image: .*/alphacar-${env.SERVICE_NAME}:.*|image: ${imageFullTag}|' ${yamlPath}
+                                    
                                     git config user.email "jenkins@alphacar.com"
                                     git config user.name "Jenkins-CI"
                                     git add .
+                                    
+                                    # 변경사항이 있을 때만 커밋
                                     if [ -n "\$(git status --porcelain)" ]; then
                                         git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
-                                        git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
-                                        echo "✅ GitOps 레포지토리 푸시 성공"
+                                        echo "✅ 로컬 커밋 완료"
+                                        
+                                        # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
+                                        git push https://\${GITHUB_TOKEN}@github.com/pogiri1207-a11y/last-alphacar.git main
+                                        echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
                                     else
-                                        echo "ℹ️ 변경 사항이 없습니다."
+                                        echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
                                     fi
                                 else
-                                    echo "❌ 에러: \$TARGET_FILE 파일을 찾을 수 없습니다."
+                                    echo "⚠️ 파일을 찾을 수 없습니다: ${yamlPath}"
                                     exit 1
                                 fi
                             """
@@ -197,6 +207,7 @@ pipeline {
             }
         }
     }
+
     post {
         always {
             sh """
