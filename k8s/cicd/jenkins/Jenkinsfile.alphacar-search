@@ -162,7 +162,7 @@ pipeline {
                                 git config user.name "Jenkins-CI"
                                 git add .
                                 if [ -n "$(git status --porcelain)" ]; then
-                                    git commit -m "Update alphacar-search image to ${env.FULL_VERSION} [skip ci]"
+                                    git commit -m "Update alphacar-.* image to \${env.FULL_VERSION} [skip ci]"
                                     git push https://${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
                                     echo "✅ GitOps 레포지토리 푸시 성공"
                                 fi
