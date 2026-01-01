@@ -38,7 +38,8 @@ pipeline {
                         echo "커밋 메시지: ${commitMessage}"
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build due to [skip ci] commit")
+                        return
+                        return due to [skip ci] commit")
                     }
                     
                     // Git 변경사항 확인
@@ -55,7 +56,8 @@ pipeline {
                         echo "⚠️ 변경된 파일이 없습니다."
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build - no changes detected")
+                        return
+                        return - no changes detected")
                     }
                     
                     echo "변경된 파일 목록:\n${changedFiles}"
@@ -78,7 +80,8 @@ pipeline {
                         echo "변경된 경로:\n${changedFiles}"
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build - no aichat path changes")
+                        return
+                        return - no aichat path changes")
                     }
                     
                     echo "✅ aichat 변경사항 확인됨 - 빌드 진행"

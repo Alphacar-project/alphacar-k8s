@@ -29,14 +29,14 @@ pipeline {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build due to [skip ci] commit")
+                        return
                     }
                     def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
                     if (!changedFiles) {
                         echo "⚠️ 변경된 파일이 없습니다."
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build - no changes detected")
+                        return
                     }
                     echo "변경된 파일 목록:\n${changedFiles}"
                     def frontendChanged = false
@@ -53,7 +53,7 @@ pipeline {
                         echo "⏭️ frontend 경로 변경사항이 없습니다. 빌드를 스킵합니다."
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        error("Skipping build - no frontend path changes")
+                        return
                     }
                     echo "✅ frontend 변경사항 확인됨 - 빌드 진행"
                     env.SKIP_BUILD = 'false'
