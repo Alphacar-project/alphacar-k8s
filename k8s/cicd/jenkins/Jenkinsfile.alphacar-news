@@ -3,14 +3,14 @@ pipeline {
     parameters {
         choice(name: 'ACTION',
                choices: ['build_and_deploy', 'skip_build'],
-               description: 'alphacar-news 빌드 및 배포를 진행하시겠습니까?')
+               description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
         string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
+        booleanParam(name: '
     }
     environment {
         ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
         AWS_REGION = 'ap-northeast-2'
-        IMAGE_NAME = 'alphacar/alphacar-news'
-        APP_NAME = 'news'
+        IMAGE_NAME = 'alphacar/news'
         GIT_CREDENTIAL_ID = 'github-cred'
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
@@ -24,18 +24,33 @@ pipeline {
                     cleanWs()
                     checkout scm
                     
-                    // 변경 감지
+                    // 변경 감지 - 최근 커밋만 확인
                     echo "🔍 변경된 파일 확인 중..."
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     echo "커밋 메시지: ${commitMessage}"
                     
+                    // [skip ci] 커밋 체크 (가장 먼저)
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         currentBuild.result = 'SUCCESS'
                         return
                     }
                     
-                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    // 최근 커밋의 변경 파일만 확인 (HEAD와 HEAD~1 비교)
+                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    
+                    // 변경 파일이 없으면 origin/main과 비교
+                    if (!changedFiles) {
+                        def remoteChanged = sh(script: 'git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                        if (remoteChanged) {
+                            // origin/main과 비교했을 때 변경이 있으면, 최근 5개 커밋만 확인
+                            def recentCommits = sh(script: 'git log --oneline -5 --pretty=%H', returnStdout: true).trim().split('\n')
+                            if (recentCommits.size() >= 2) {
+                                changedFiles = sh(script: "git diff --name-only ${recentCommits[1]} ${recentCommits[0]} 2>/dev/null || echo \"\"", returnStdout: true).trim()
+                            }
+                        }
+                    }
+                    
                     echo "변경된 파일:\n${changedFiles}"
                     
                     if (!changedFiles) {
@@ -44,11 +59,16 @@ pipeline {
                         return
                     }
                     
+                    // news 경로 변경 확인
                     def newsChanged = false
                     def fileList = changedFiles.split('\n')
                     for (file in fileList) {
                         file = file.trim()
-                        if (file && file.contains('dev/alphacar/backend/news')) {
+                        // Jenkinsfile 변경은 무시
+                        if (file.contains('Jenkinsfile')) {
+                            continue
+                        }
+                        if (file && file.contains('dev/alphacar/news')) {
                             newsChanged = true
                             echo "✅ news 관련 변경 감지: ${file}"
                             break
@@ -73,27 +93,46 @@ pipeline {
                         echo "✅ Docker 리소스 정리 완료"
                     '''
                     def baseVer = "1.0"
-                    def versionPath = 'dev/alphacar/backend/version.txt'
-                    if (fileExists(versionPath)) {
-                        baseVer = readFile(versionPath).trim()
+                    def versionPath = 'dev/alphacar/news/version.txt'
+                    try {
+                        if (fileExists(versionPath)) {
+                            baseVer = readFile(versionPath).trim()
+                        }
+                    } catch (e) {
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
                     }
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
             }
         }
         stage('2. Security & Analysis') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { !params.
+                }
+            }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    dir('dev/alphacar/backend/news') {
-                        withSonarQubeEnv('sonarqube') {
-                            sh "${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.projectKey=alphacar-news \
-                                -Dsonar.sources=. \
-                                -Dsonar.host.url=http://localhost:9000 \
-                                -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873"
+                    dir('dev/alphacar/news') {
+                        timeout(time: 30, unit: 'MINUTES') {
+                            withEnv(["SONAR_SCANNER_OPTS=-Xmx2048m -Xms512m"]) {
+                                withSonarQubeEnv('sonarqube') {
+                                    sh """
+                                        ${scannerHome}/bin/sonar-scanner \
+                                        -Dsonar.projectKey=alphacar-news \
+                                        -Dsonar.sources=. \
+                                        -Dsonar.host.url=http://localhost:9000 \
+                                        -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 \
+                                        -Dsonar.scanner.socketTimeout=1800 \
+                                        -Dsonar.scanner.connectTimeout=600 \
+                                        -Dsonar.analysis.mode=publish
+                                    """
+                                }
+                            }
                         }
                     }
                 }
@@ -104,8 +143,9 @@ pipeline {
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
-                    dir('dev/alphacar/backend/news') {
-                        sh "docker build --build-arg APP_NAME=${APP_NAME} --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
+                    echo "🐳 도커 빌드 시작: ${imageFullTag}"
+                    dir('dev/alphacar/news') {
+                        sh "docker build --build-arg APP_NAME=news --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
                         script {
                             def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
                             if (!awsPath || !fileExists(awsPath)) {
@@ -122,30 +162,32 @@ pipeline {
                 }
             }
         }
-        stage('4. Update Manifest') {
+        stage('4. Update Manifest (GitOps)') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM', 
-                            branches: [[name: 'main']], 
-                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
-                        ])
-                        def yamlPath = "k8s/backend/news-backend.yaml"
+                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]])
                         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                             sh """
                                 git checkout -B main || git checkout main
-                                if [ -f "${yamlPath}" ]; then
-                                    sed -i 's|image: .*/alphacar-news:.*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${yamlPath}
-                                    echo "✅ 매니페스트 업데이트 완료: ${yamlPath}"
-                                fi
-                                git config user.email "jenkins@alphacar.com"
-                                git config user.name "Jenkins-CI"
-                                git add .
-                                if [ -n "\$(git status --porcelain)" ]; then
-                                    git commit -m "Update alphacar-news image to ${env.FULL_VERSION} [skip ci]"
-                                    git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
-                                    echo "✅ GitOps 레포지토리 푸시 성공"
+                                TARGET_FILE="k8s/news/news-deployment-multimaster.yaml"
+                                if [ -f "\$TARGET_FILE" ]; then
+                                    echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
+                                    sed -i "s|image: .*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
+                                    git config user.email "jenkins@alphacar.com"
+                                    git config user.name "Jenkins-CI"
+                                    git add .
+                                    if [ -n "\$(git status --porcelain)" ]; then
+                                        git commit -m "Update news image to ${env.FULL_VERSION} [skip ci]"
+                                        git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                        echo "✅ GitOps 레포지토리 푸시 성공"
+                                    else
+                                        echo "ℹ️ 변경 사항이 없습니다."
+                                    fi
+                                else
+                                    echo "❌ 에러: \$TARGET_FILE 파일을 찾을 수 없습니다."
+                                    exit 1
                                 fi
                             """
                         }
