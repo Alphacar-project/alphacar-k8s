@@ -17,47 +17,6 @@ pipeline {
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
             }
     stages {
-        stage('0. Check Changes') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
-            steps {
-                script {
-                    echo "🔍 변경된 파일 확인 중..."
-                    checkout scm
-                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
-                    if (commitMessage.contains('[skip ci]')) {
-                        echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
-                                                currentBuild.result = 'SUCCESS'
-                        return
-                        return due to [skip ci] commit")
-                    }
-                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
-                    if (!changedFiles) {
-                        echo "⚠️ 변경된 파일이 없습니다."
-                                                currentBuild.result = 'SUCCESS'
-                        return
-                        return - no changes detected")
-                    }
-                    echo "변경된 파일 목록:\n${changedFiles}"
-                    def communityChanged = false
-                    def fileList = changedFiles.split('\n')
-                    for (file in fileList) {
-                        file = file.trim()
-                        if (file && file.contains('dev/alphacar/backend/community')) {
-                            communityChanged = true
-                            echo "✅ community 관련 변경 감지: ${file}"
-                            break
-                        }
-                    }
-                    if (!communityChanged) {
-                        echo "⏭️ community 경로 변경사항이 없습니다. 빌드를 스킵합니다."
-                                                currentBuild.result = 'SUCCESS'
-                        return
-                        return - no community path changes")
-                    }
-                    echo "✅ community 변경사항 확인됨 - 빌드 진행"
-                    env.                }
-            }
-        }
         stage('1. Prepare') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
