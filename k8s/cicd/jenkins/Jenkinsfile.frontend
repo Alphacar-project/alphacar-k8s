@@ -5,6 +5,7 @@ pipeline {
                choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
         string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
+        booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: 'SonarQube 분석 스킵 (타임아웃 발생 시 사용)')
     }
     environment {
         ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
@@ -46,22 +47,32 @@ pipeline {
             }
         }
         stage('2. Security & Quality Analysis') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { !params.SKIP_SONAR }
+                }
+            }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
-                        withEnv(["SONAR_SCANNER_OPTS=-Xmx1024m"]) {
-                            // SonarQube 분석
-                            withSonarQubeEnv('sonarqube') {
-                                sh """
-                                    ${scannerHome}/bin/sonar-scanner \
-                                    -Dsonar.projectKey=alphacar-frontend \
-                                    -Dsonar.sources=. \
-                                    -Dsonar.host.url=http://localhost:9000 \
-                                    -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 \
-                                    -Dsonar.ws.timeout=600
-                                """
+                        // 타임아웃 설정 (30분)
+                        timeout(time: 30, unit: 'MINUTES') {
+                            withEnv(["SONAR_SCANNER_OPTS=-Xmx2048m -Xms512m"]) {
+                                // SonarQube 분석
+                                withSonarQubeEnv('sonarqube') {
+                                    sh """
+                                        ${scannerHome}/bin/sonar-scanner \
+                                        -Dsonar.projectKey=alphacar-frontend \
+                                        -Dsonar.sources=. \
+                                        -Dsonar.host.url=http://localhost:9000 \
+                                        -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 \
+                                        -Dsonar.scanner.socketTimeout=1800 \
+                                        -Dsonar.scanner.connectTimeout=600 \
+                                        -Dsonar.analysis.mode=publish
+                                    """
+                                }
                             }
                         }
                     }
