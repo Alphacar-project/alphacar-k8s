@@ -29,7 +29,7 @@ spec:
       containers:
       - name: aichat-backend
         # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.1
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.0.5-fc054c4
         imagePullPolicy: Always
         ports:
         - containerPort: 4000
