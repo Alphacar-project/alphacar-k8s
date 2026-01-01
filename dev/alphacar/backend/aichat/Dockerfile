@@ -1,4 +1,4 @@
-### glibc 기반 이미지 사용 (Alpine 대신)
+# glibc 기반 이미지 사용 (Alpine 대신)
 FROM node:20-slim
 
 # 필요한 시스템 라이브러리 설치
