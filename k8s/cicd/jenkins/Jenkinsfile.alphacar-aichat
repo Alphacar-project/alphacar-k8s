@@ -15,6 +15,7 @@ pipeline {
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
+        SKIP_BUILD = 'false'
     }
     stages {
         stage('0. Check Changes') {
@@ -25,6 +26,20 @@ pipeline {
                     
                     // 먼저 코드 체크아웃 (변경사항 확인을 위해)
                     checkout scm
+                    
+                    // 커밋 메시지 확인 ([skip ci] 체크)
+                    def commitMessage = sh(
+                        script: 'git log -1 --pretty=%B',
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (commitMessage.contains('[skip ci]')) {
+                        echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
+                        echo "커밋 메시지: ${commitMessage}"
+                        env.SKIP_BUILD = 'true'
+                        currentBuild.result = 'SUCCESS'
+                        error("Skipping build due to [skip ci] commit")
+                    }
                     
                     // Git 변경사항 확인
                     def changedFiles = sh(
@@ -38,8 +53,9 @@ pipeline {
                     
                     if (!changedFiles) {
                         echo "⚠️ 변경된 파일이 없습니다."
+                        env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        return
+                        error("Skipping build - no changes detected")
                     }
                     
                     echo "변경된 파일 목록:\n${changedFiles}"
@@ -60,16 +76,23 @@ pipeline {
                     if (!aichatChanged) {
                         echo "⏭️ aichat 경로 변경사항이 없습니다. 빌드를 스킵합니다."
                         echo "변경된 경로:\n${changedFiles}"
+                        env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
-                        return
+                        error("Skipping build - no aichat path changes")
                     }
                     
                     echo "✅ aichat 변경사항 확인됨 - 빌드 진행"
+                    env.SKIP_BUILD = 'false'
                 }
             }
         }
         stage('1. Prepare') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
                     cleanWs()
@@ -93,7 +116,12 @@ pipeline {
             }
         }
         stage('2. Security & Analysis') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
@@ -111,7 +139,12 @@ pipeline {
             }
         }
         stage('3. Docker Build & Push to ECR') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
@@ -135,7 +168,12 @@ pipeline {
             }
         }
         stage('4. Update Manifest') {
-            when { expression { params.ACTION == 'build_and_deploy' } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
                     dir('manifest-update') {
