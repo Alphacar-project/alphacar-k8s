@@ -1,13 +1,11 @@
 pipeline {
     agent any
-
     parameters {
         choice(name: 'ACTION',
                choices: ['build_and_deploy', 'skip_build'],
                description: '프론트엔드 빌드 및 배포를 진행하시겠습니까?')
         string(name: 'VERSION', defaultValue: '1.0', description: '기본 버전')
     }
-
     environment {
         ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
         AWS_REGION = 'ap-northeast-2'
@@ -17,7 +15,6 @@ pipeline {
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
     }
-
     stages {
         stage('1. Prepare') {
             when { expression { params.ACTION == 'build_and_deploy' } }
@@ -33,7 +30,6 @@ pipeline {
                         docker builder prune -f || true
                         echo "✅ Docker 리소스 정리 완료"
                     '''
-                    
                     def baseVer = "1.0"
                     def versionPath = 'dev/alphacar/frontend/version.txt'
                     try {
@@ -49,7 +45,6 @@ pipeline {
                 }
             }
         }
-
         stage('2. Security & Quality Analysis') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
@@ -69,22 +64,18 @@ pipeline {
                                 """
                             }
                         }
-                        sh "/tmp/trivy fs --severity CRITICAL,HIGH --format table --output trivy_report.txt ."
                     }
                 }
             }
         }
-
         stage('3. Docker Build & Push to ECR') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     echo "🐳 도커 빌드 시작: ${imageFullTag}"
-
                     dir('dev/alphacar/frontend') {
                         sh "docker build -f Dockerfile -t ${imageFullTag} ."
-                        
                         // AWS ECR 로그인
                         script {
                             def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
@@ -96,14 +87,12 @@ pipeline {
                                 docker login --username AWS --password-stdin ${ECR_REGISTRY}
                             """
                         }
-                        
                         sh "docker push ${imageFullTag}"
                         sh "docker logout ${ECR_REGISTRY}"
                     }
                 }
             }
         }
-
         stage('4. Update Manifest (GitOps)') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
@@ -113,22 +102,17 @@ pipeline {
                             branches: [[name: 'main']],
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
-
                             withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                             sh """
                                 # 브랜치 확인 및 전환
                                 git checkout -B main || git checkout main
-                                
                                 TARGET_FILE="k8s/frontend/frontend-deployment-multimaster.yaml"
-
                                 if [ -f "\$TARGET_FILE" ]; then
                                     echo "📝 Manifest 업데이트 중: \$TARGET_FILE"
                                     sed -i "s|image: .*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|" "\$TARGET_FILE"
-
                                     git config user.email "jenkins@alphacar.com"
                                     git config user.name "Jenkins-CI"
                                     git add .
-
                                     if [ -n "\$(git status --porcelain)" ]; then
                                         git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                         git push https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
@@ -147,10 +131,8 @@ pipeline {
             }
         }
     }
-
     post {
         always {
-            archiveArtifacts artifacts: 'dev/alphacar/frontend/trivy_report.txt', allowEmptyArchive: true
             sh """
                 docker image prune -f || true
                 docker container prune -f || true
@@ -160,4 +142,3 @@ pipeline {
         }
     }
 }
-

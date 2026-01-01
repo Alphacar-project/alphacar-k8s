@@ -1,37 +1,35 @@
-# 1단계: 빌드 스테이지
-FROM node:20-alpine AS builder
-RUN apk add --no-cache libc6-compat
+# glibc 기반 이미지 사용 (Alpine 대신)
+FROM node:20-slim
+
+# 필요한 시스템 라이브러리 설치
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    build-essential \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# 네트워크 안정성 설정
-RUN npm config set fetch-retry-maxtimeout 120000 && \
-    npm config set fetch-retry-mintimeout 20000 && \
-    npm config set fetch-retries 5
-
-# 1. 패키지 파일들 먼저 복사 (캐시 활용)
+# package.json 복사 및 의존성 설치
 COPY package*.json ./
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
-# 2. 의존성 설치
-RUN npm ci --legacy-peer-deps --prefer-offline --no-audit
-
-# 3. 전역 도구 설치
-RUN npm install -g @nestjs/cli
-
-# 4. 소스 코드 복사
+# 소스 코드 복사 (aichat 디렉토리 전체)
 COPY . .
 
-# 5. 빌드 수행
-RUN nest build
+# 빌드 실행 (aichat만 빌드하므로 APP_NAME 불필요)
+RUN npm run build
 
-# 2단계: 실행 스테이지
-FROM node:20-alpine
-WORKDIR /app
-RUN apk add --no-cache libc6-compat
+# 프로덕션 의존성만 유지 (선택사항)
+RUN npm prune --production
 
-# 6. 결과물 복사
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+# 벡터 스토어 디렉토리 생성
+RUN mkdir -p /app/vector_store
 
-EXPOSE 3000
-CMD ["node", "dist/main"]
+# 포트 노출
+EXPOSE 4000
+
+# 애플리케이션 실행
+CMD ["node", "dist/src/main.js"]
