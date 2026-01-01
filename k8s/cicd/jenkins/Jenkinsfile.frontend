@@ -179,7 +179,7 @@ pipeline {
                     
                     // ECR 이미지 경로로 업데이트
                     sh """
-                        sed -i 's|image: .*/alphacar-${env.SERVICE_NAME}:.*|image: ${imageFullTag}|' ${yamlPath}
+                        sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
                     """
                     
                     // Git 커밋 및 푸시
