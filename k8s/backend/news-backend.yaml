@@ -20,7 +20,7 @@ spec:
       - name: news-backend
         # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
         # 빌드 및 푸시하신 버전에 맞춰 태그(1.0.1 등)를 지정하세요.
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-news:1.0.0.5-e92cc3f
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-news:1.0.0.17-0748057
         imagePullPolicy: Always
         ports:
         - containerPort: 3008
