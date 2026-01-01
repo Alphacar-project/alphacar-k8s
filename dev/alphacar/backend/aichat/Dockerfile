@@ -1,6 +1,6 @@
 # glibc 기반 이미지 사용 (Alpine 대신)
 FROM node:20-slim
-# 테스트: 필터 설정 수정 후 재테스트 (2024-01-01 15:10)
+# 테스트: 필터 최종 확인 (2024-01-01 15:15)
 
 # 필요한 시스템 라이브러리 설치
 RUN apt-get update && apt-get install -y \
