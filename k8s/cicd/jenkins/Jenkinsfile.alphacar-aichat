@@ -151,11 +151,12 @@ pipeline {
                             userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
                         ])
                         def yamlPath = "k8s/backend/aichat-backend.yaml"
+                        def imageTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                             sh """
                                 git checkout -B main || git checkout main
                                 if [ -f "\${yamlPath}" ]; then
-                                    IMAGE_TAG="${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                                    IMAGE_TAG="${imageTag}"
                                     sed -i "s|image: .*/alphacar-aichat:.*|image: ${IMAGE_TAG}|" \${yamlPath}
                                     echo "✅ 매니페스트 업데이트 완료: \${yamlPath}"
                                 fi
