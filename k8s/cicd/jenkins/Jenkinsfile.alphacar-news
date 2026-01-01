@@ -24,38 +24,36 @@ pipeline {
                     cleanWs()
                     checkout scm
                     
-                    // 변경 감지 - 최근 커밋만 확인
+                    // 변경 감지
                     echo "🔍 변경된 파일 확인 중..."
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     echo "커밋 메시지: ${commitMessage}"
                     
-                    // [skip ci] 커밋 체크 (가장 먼저)
+                    // [skip ci] 커밋 체크
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - [skip ci])"
                         return
                     }
                     
-                    // 최근 커밋의 변경 파일만 확인 (HEAD와 HEAD~1 비교)
+                    // 최근 커밋의 변경 파일 확인
                     def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    echo "변경된 파일 (HEAD~1 vs HEAD):\n${changedFiles}"
                     
-                    // 변경 파일이 없으면 origin/main과 비교
-                    if (!changedFiles) {
-                        def remoteChanged = sh(script: 'git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
-                        if (remoteChanged) {
-                            // origin/main과 비교했을 때 변경이 있으면, 최근 5개 커밋만 확인
-                            def recentCommits = sh(script: 'git log --oneline -5 --pretty=%H', returnStdout: true).trim().split('\n')
-                            if (recentCommits.size() >= 2) {
-                                changedFiles = sh(script: "git diff --name-only ${recentCommits[1]} ${recentCommits[0]} 2>/dev/null || echo \"\"", returnStdout: true).trim()
-                            }
+                    // 변경 파일이 없으면 최근 2개 커밋 비교
+                    if (!changedFiles || changedFiles.trim().isEmpty()) {
+                        def recentCommits = sh(script: 'git log -2 --pretty=%H', returnStdout: true).trim().split('\n')
+                        if (recentCommits.size() >= 2) {
+                            changedFiles = sh(script: "git diff --name-only ${recentCommits[1]} ${recentCommits[0]} 2>/dev/null || echo \"\"", returnStdout: true).trim()
+                            echo "변경된 파일 (최근 2개 커밋 비교):\n${changedFiles}"
                         }
                     }
                     
-                    echo "변경된 파일:\n${changedFiles}"
-                    
-                    if (!changedFiles) {
+                    if (!changedFiles || changedFiles.trim().isEmpty()) {
                         echo "⚠️ 변경된 파일이 없습니다."
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No changes)"
                         return
                     }
                     
@@ -66,8 +64,10 @@ pipeline {
                         file = file.trim()
                         // Jenkinsfile 변경은 무시
                         if (file.contains('Jenkinsfile')) {
+                            echo "Jenkinsfile 변경 무시: ${file}"
                             continue
                         }
+                        // news 경로 확인
                         if (file && file.contains('dev/alphacar/news')) {
                             newsChanged = true
                             echo "✅ news 관련 변경 감지: ${file}"
@@ -79,6 +79,7 @@ pipeline {
                         echo "⏭️ news 경로 변경사항이 없습니다. 빌드를 스킵합니다."
                         echo "변경된 경로:\n${changedFiles}"
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No news changes)"
                         return
                     }
                     

@@ -33,6 +33,7 @@ pipeline {
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - [skip ci])"
                         return
                     }
                     
@@ -52,6 +53,7 @@ pipeline {
                     if (!changedFiles || changedFiles.trim().isEmpty()) {
                         echo "⚠️ 변경된 파일이 없습니다."
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No changes)"
                         return
                     }
                     
@@ -77,6 +79,7 @@ pipeline {
                         echo "⏭️ frontend 경로 변경사항이 없습니다. 빌드를 스킵합니다."
                         echo "변경된 경로:\n${changedFiles}"
                         currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No frontend changes)"
                         return
                     }
                     
