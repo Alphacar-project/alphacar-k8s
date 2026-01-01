@@ -174,7 +174,7 @@ pipeline {
                         ])
 
                         // Argo CD 저장소 내 프론트엔드 YAML 경로
-                        def yamlPath = "k8s/frontend/${env.SERVICE_NAME}-deployment.yaml"
+                        def yamlPath = "k8s/frontend/frontend-deployment-multimaster.yaml"
                         def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
 
                         // 1. 파일 수정 및 로컬 커밋
