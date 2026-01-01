@@ -15,16 +15,55 @@ pipeline {
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
-            }
+    }
     stages {
         stage('1. Prepare') {
-            when { 
-                expression { params.ACTION == 'build_and_deploy' }
-            }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     cleanWs()
                     checkout scm
+                    
+                    // 변경 감지
+                    echo "🔍 변경된 파일 확인 중..."
+                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    echo "커밋 메시지: ${commitMessage}"
+                    
+                    if (commitMessage.contains('[skip ci]')) {
+                        echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    echo "변경된 파일:\n${changedFiles}"
+                    
+                    if (!changedFiles) {
+                        echo "⚠️ 변경된 파일이 없습니다."
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    def searchChanged = false
+                    def fileList = changedFiles.split('\n')
+                    for (file in fileList) {
+                        file = file.trim()
+                        if (file && file.contains('dev/alphacar/backend/search')) {
+                            searchChanged = true
+                            echo "✅ search 관련 변경 감지: ${file}"
+                            break
+                        }
+                    }
+                    
+                    if (!searchChanged) {
+                        echo "⏭️ search 경로 변경사항이 없습니다. 빌드를 스킵합니다."
+                        echo "변경된 경로:\n${changedFiles}"
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    echo "✅ search 변경사항 확인됨 - 빌드 진행"
+                    
                     // 디스크 공간 확보를 위한 Docker 리소스 정리
                     sh '''
                         echo "🧹 빌드 전 Docker 리소스 정리 중..."
@@ -44,14 +83,11 @@ pipeline {
             }
         }
         stage('2. Security & Analysis') {
-            when { 
-                expression { params.ACTION == 'build_and_deploy' }
-            }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/backend/search') {
-                        // SonarQube 분석
                         withSonarQubeEnv('sonarqube') {
                             sh "${scannerHome}/bin/sonar-scanner \
                                 -Dsonar.projectKey=alphacar-search \
@@ -64,15 +100,12 @@ pipeline {
             }
         }
         stage('3. Docker Build & Push to ECR') {
-            when { 
-                expression { params.ACTION == 'build_and_deploy' }
-            }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     dir('dev/alphacar/backend/search') {
                         sh "docker build --build-arg APP_NAME=${APP_NAME} --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
-                        // AWS ECR 로그인
                         script {
                             def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
                             if (!awsPath || !fileExists(awsPath)) {
@@ -90,9 +123,7 @@ pipeline {
             }
         }
         stage('4. Update Manifest') {
-            when { 
-                expression { params.ACTION == 'build_and_deploy' }
-            }
+            when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
                 script {
                     dir('manifest-update') {
@@ -103,7 +134,6 @@ pipeline {
                         def yamlPath = "k8s/backend/search-backend.yaml"
                         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                             sh """
-                                # 브랜치 확인 및 전환
                                 git checkout -B main || git checkout main
                                 if [ -f "${yamlPath}" ]; then
                                     sed -i 's|image: .*/alphacar-search:.*|image: ${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}|' ${yamlPath}

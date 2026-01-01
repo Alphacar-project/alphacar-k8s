@@ -15,42 +15,56 @@ pipeline {
         SONARQUBE_NAME = 'SonarQube'
         SONAR_HOST_URL = 'http://192.168.0.170:32000'
         MANIFEST_REPO_URL = 'https://github.com/Alphacar-project/alphacar-k8s.git'
-            }
+    }
     stages {
         stage('1. Prepare') {
             when { expression { params.ACTION == 'build_and_deploy' } }
             steps {
-                
-                    // 변경 감지 재확인
+                script {
+                    cleanWs()
                     checkout scm
+                    
+                    // 변경 감지
+                    echo "🔍 변경된 파일 확인 중..."
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    echo "커밋 메시지: ${commitMessage}"
+                    
                     if (commitMessage.contains('[skip ci]')) {
-                        echo "⏭️ [skip ci] 커밋 - 빌드 스킵"
-                        currentBuild.result = 'SUCCESS'
-                        return
-                    }
-                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
-                    if (!changedFiles) {
-                        echo "⏭️ 변경 없음 - 빌드 스킵"
-                        currentBuild.result = 'SUCCESS'
-                        return
-                    }
-                    def communityChanged = false
-                    changedFiles.split('
-').each { file ->
-                        if (file.trim().contains('dev/alphacar/backend/community')) {
-                            communityChanged = true
-                        }
-                    }
-                    if (!communityChanged) {
-                        echo "⏭️ community 경로 변경 없음 - 빌드 스킵"
+                        echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
                         currentBuild.result = 'SUCCESS'
                         return
                     }
                     
-                    cleanWs()
-                checkout scm
-                script {
+                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    echo "변경된 파일:\n${changedFiles}"
+                    
+                    if (!changedFiles) {
+                        echo "⚠️ 변경된 파일이 없습니다."
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    def communityChanged = false
+                    def fileList = changedFiles.split('\n')
+                    for (file in fileList) {
+                        file = file.trim()
+                        if (file && file.contains('dev/alphacar/backend/community')) {
+                            communityChanged = true
+                            echo "✅ community 관련 변경 감지: ${file}"
+                            break
+                        }
+                    }
+                    
+                    if (!communityChanged) {
+                        echo "⏭️ community 경로 변경사항이 없습니다. 빌드를 스킵합니다."
+                        echo "변경된 경로:\n${changedFiles}"
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    
+                    echo "✅ community 변경사항 확인됨 - 빌드 진행"
+                    
+                    // 디스크 공간 확보를 위한 Docker 리소스 정리
                     sh '''
                         echo "🧹 빌드 전 Docker 리소스 정리 중..."
                         docker image prune -f || true
@@ -73,9 +87,13 @@ pipeline {
             steps {
                 script {
                     def scannerHome = tool name: 'sonar-scanner'
-                    dir('dev/alphacar/backend') {
+                    dir('dev/alphacar/backend/community') {
                         withSonarQubeEnv('sonarqube') {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=alphacar-community -Dsonar.sources=. -Dsonar.host.url=http://localhost:9000 -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873"
+                            sh "${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.projectKey=alphacar-community \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=http://localhost:9000 \
+                                -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873"
                         }
                     }
                 }
@@ -86,7 +104,7 @@ pipeline {
             steps {
                 script {
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
-                    dir('dev/alphacar/backend') {
+                    dir('dev/alphacar/backend/community') {
                         sh "docker build --build-arg APP_NAME=${APP_NAME} --build-arg BUILDKIT_INLINE_CACHE=1 -f Dockerfile -t ${imageFullTag} ."
                         script {
                             def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
@@ -109,7 +127,10 @@ pipeline {
             steps {
                 script {
                     dir('manifest-update') {
-                        checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]])
+                        checkout([$class: 'GitSCM', 
+                            branches: [[name: 'main']], 
+                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
+                        ])
                         def yamlPath = "k8s/backend/community-backend.yaml"
                         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                             sh """
