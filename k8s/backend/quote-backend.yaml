@@ -20,7 +20,7 @@ spec:
       - name: quote-backend
         # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
         # (코드 수정 후 빌드하신 1.0.1 버전을 기준으로 설정했습니다)
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-quote:1.0.1
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-quote:1.0.0.6-f3c4a13
         imagePullPolicy: Always
         ports:
         - containerPort: 3003
