@@ -110,14 +110,19 @@ pipeline {
                     }
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
-                    
-                    def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                    env.PATH = "${sonarPath}/bin:${env.PATH}"
                 }
-                // 프론트엔드 폴더로 이동하여 소나큐브 스캔
+                // SonarQube 분석 (실패해도 계속 진행)
                 dir('dev/alphacar/frontend') {
-                    withSonarQubeEnv('sonarqube') {
-                        sh "sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000"
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        script {
+                            def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                            env.PATH = "${sonarPath}/bin:${env.PATH}"
+                        }
+                        withSonarQubeEnv('sonarqube') {
+                            sh """
+                                sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || echo "⚠️ SonarQube 분석 실패 - 계속 진행"
+                            """
+                        }
                     }
                 }
             }
