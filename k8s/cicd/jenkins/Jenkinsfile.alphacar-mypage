@@ -157,7 +157,7 @@ pipeline {
                                 git checkout -B main || git checkout main
                                 if [ -f "\${yamlPath}" ]; then
                                     IMAGE_TAG="${imageTag}"
-                                    sed -i "s|image: .*/alphacar-mypage:.*|image: ${IMAGE_TAG}|" \${yamlPath}
+                                    sed -i "s|image: .*/alphacar-mypage:.*|image: \${IMAGE_TAG}|" \${yamlPath}
                                     echo "✅ 매니페스트 업데이트 완료: \${yamlPath}"
                                 fi
                                 git config user.email "jenkins@alphacar.com"
