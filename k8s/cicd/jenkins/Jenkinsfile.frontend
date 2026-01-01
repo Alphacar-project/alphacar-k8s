@@ -165,48 +165,42 @@ pipeline {
             steps {
                 script {
                     echo "🚀 [GitOps] 프론트엔드 Manifest 업데이트 시작"
-                    dir('manifest-update') {
-                        // 저장소 클론 (main 브랜치 명시 및 Detached HEAD 방지)
-                        checkout([$class: 'GitSCM',
-                            branches: [[name: 'main']],
-                            extensions: [[$class: 'LocalBranch', localBranch: 'main']],
-                            userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]]
-                        ])
+                    
+                    // 현재 저장소의 매니페스트 파일 직접 업데이트
+                    def yamlPath = "k8s/frontend/frontend-deployment-multimaster.yaml"
+                    def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
 
-                        // Argo CD 저장소 내 프론트엔드 YAML 경로
-                        def yamlPath = "k8s/frontend/frontend-deployment-multimaster.yaml"
-                        def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                    // 파일 존재 확인
+                    if (!fileExists(yamlPath)) {
+                        error "❌ 매니페스트 파일을 찾을 수 없습니다: ${yamlPath}"
+                    }
 
-                        // 1. 파일 수정 및 로컬 커밋
-                        withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
-                            sh """
-                                if [ -f "${yamlPath}" ]; then
-                                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
-                                    
-                                    # ECR 이미지 경로로 업데이트 (기존 경로 무시하고 강제 교체)
-                                    sed -i 's|image: .*/alphacar-${env.SERVICE_NAME}:.*|image: ${imageFullTag}|' ${yamlPath}
-                                    
-                                    git config user.email "jenkins@alphacar.com"
-                                    git config user.name "Jenkins-CI"
-                                    git add .
-                                    
-                                    # 변경사항이 있을 때만 커밋
-                                    if [ -n "\$(git status --porcelain)" ]; then
-                                        git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
-                                        echo "✅ 로컬 커밋 완료"
-                                        
-                                        # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
-                                        git push https://\${GITHUB_TOKEN}@github.com/pogiri1207-a11y/last-alphacar.git main
-                                        echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
-                                    else
-                                        echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
-                                    fi
-                                else
-                                    echo "⚠️ 파일을 찾을 수 없습니다: ${yamlPath}"
-                                    exit 1
-                                fi
-                            """
-                        }
+                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
+                    
+                    // ECR 이미지 경로로 업데이트
+                    sh """
+                        sed -i 's|image: .*/alphacar-${env.SERVICE_NAME}:.*|image: ${imageFullTag}|' ${yamlPath}
+                    """
+                    
+                    // Git 커밋 및 푸시
+                    withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                        sh """
+                            git config user.email "jenkins@alphacar.com"
+                            git config user.name "Jenkins-CI"
+                            git add ${yamlPath}
+                            
+                            # 변경사항이 있을 때만 커밋
+                            if [ -n "\$(git status --porcelain)" ]; then
+                                git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
+                                echo "✅ 로컬 커밋 완료"
+                                
+                                # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
+                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
+                            else
+                                echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
+                            fi
+                        """
                     }
                 }
             }
