@@ -24,6 +24,7 @@ pipeline {
                 script {
                     echo "🔍 변경된 파일 확인 중..."
                     checkout scm
+                    
                     def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (commitMessage.contains('[skip ci]')) {
                         echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
@@ -31,6 +32,7 @@ pipeline {
                         currentBuild.result = 'SUCCESS'
                         return
                     }
+                    
                     def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
                     if (!changedFiles) {
                         echo "⚠️ 변경된 파일이 없습니다."
@@ -38,7 +40,9 @@ pipeline {
                         currentBuild.result = 'SUCCESS'
                         return
                     }
+                    
                     echo "변경된 파일 목록:\n${changedFiles}"
+                    
                     def frontendChanged = false
                     def fileList = changedFiles.split('\n')
                     for (file in fileList) {
@@ -49,23 +53,35 @@ pipeline {
                             break
                         }
                     }
+                    
                     if (!frontendChanged) {
                         echo "⏭️ frontend 경로 변경사항이 없습니다. 빌드를 스킵합니다."
+                        echo "변경된 경로:\n${changedFiles}"
                         env.SKIP_BUILD = 'true'
                         currentBuild.result = 'SUCCESS'
                         return
                     }
+                    
                     echo "✅ frontend 변경사항 확인됨 - 빌드 진행"
                     env.SKIP_BUILD = 'false'
                 }
             }
         }
         stage('1. Prepare') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
-                cleanWs()
-                checkout scm
                 script {
+                    if (env.SKIP_BUILD == 'true') {
+                        echo "⏭️ 빌드 스킵됨"
+                        return
+                    }
+                    cleanWs()
+                    checkout scm
                     sh '''
                         echo "🧹 빌드 전 Docker 리소스 정리 중..."
                         docker image prune -f || true
@@ -89,9 +105,19 @@ pipeline {
             }
         }
         stage('2. Security & Quality Analysis') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { !params.SKIP_SONAR } expression { env.SKIP_BUILD != 'true' } } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { !params.SKIP_SONAR }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
+                    if (env.SKIP_BUILD == 'true') {
+                        echo "⏭️ 빌드 스킵됨"
+                        return
+                    }
                     def scannerHome = tool name: 'sonar-scanner'
                     dir('dev/alphacar/frontend') {
                         timeout(time: 30, unit: 'MINUTES') {
@@ -115,9 +141,18 @@ pipeline {
             }
         }
         stage('3. Docker Build & Push to ECR') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
+                    if (env.SKIP_BUILD == 'true') {
+                        echo "⏭️ 빌드 스킵됨"
+                        return
+                    }
                     def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                     echo "🐳 도커 빌드 시작: ${imageFullTag}"
                     dir('dev/alphacar/frontend') {
@@ -139,9 +174,18 @@ pipeline {
             }
         }
         stage('4. Update Manifest (GitOps)') {
-            when { allOf { expression { params.ACTION == 'build_and_deploy' } expression { env.SKIP_BUILD != 'true' } } }
+            when { 
+                allOf {
+                    expression { params.ACTION == 'build_and_deploy' }
+                    expression { env.SKIP_BUILD != 'true' }
+                }
+            }
             steps {
                 script {
+                    if (env.SKIP_BUILD == 'true') {
+                        echo "⏭️ 빌드 스킵됨"
+                        return
+                    }
                     dir('manifest-update') {
                         checkout([$class: 'GitSCM', branches: [[name: 'main']], userRemoteConfigs: [[url: "${env.MANIFEST_REPO_URL}", credentialsId: "${env.GIT_CREDENTIAL_ID}"]])
                         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
