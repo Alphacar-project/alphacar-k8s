@@ -250,9 +250,12 @@ def buildService(String appName, String imageName) {
         withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIAL_ID, usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
             sh """
                 git checkout -B main || git checkout main
-                # 원격 저장소의 최신 변경사항 가져오기
-                git fetch https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main
-                git rebase origin/main || git rebase --abort
+                # 원격 저장소의 최신 변경사항 가져오기 및 병합
+                git fetch https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                git pull --rebase https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
+                    echo "⚠️ Rebase 실패 - merge 시도"
+                    git pull --no-rebase https://\${GH_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                }
                 
                 if [ -f "${manifestPath}" ]; then
                     sed -i "s|image: .*/${imageName}:.*|image: ${imageFullTag}|" ${manifestPath}

@@ -194,8 +194,11 @@ pipeline {
                                 echo "✅ 로컬 커밋 완료"
                                 
                                 # 원격 저장소의 최신 변경사항 가져오기 및 병합
-                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main
-                                git rebase origin/main || git rebase --abort
+                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                                git pull --rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
+                                    echo "⚠️ Rebase 실패 - merge 시도"
+                                    git pull --no-rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                                }
                                 
                                 # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
                                 git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
