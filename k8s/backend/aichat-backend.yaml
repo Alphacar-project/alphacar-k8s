@@ -148,7 +148,8 @@ spec:
             cpu: "1000m"
       volumes:
       - name: vector-store
-        emptyDir: {}
+        persistentVolumeClaim:
+          claimName: aichat-vector-store-pvc
 ---
 apiVersion: v1
 kind: Service

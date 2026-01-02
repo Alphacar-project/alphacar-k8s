@@ -1,0 +1,31 @@
+# MongoDB External Service
+# EC2 인스턴스에서 실행 중인 MongoDB를 Kubernetes 서비스로 노출
+
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: mongodb
+  namespace: apc-db-ns
+subsets:
+- addresses:
+  - ip: 10.10.9.210  # EC2 MongoDB 프라이머리 인스턴스의 프라이빗 IP
+  ports:
+  - port: 27017
+    name: mongodb
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: apc-db-ns
+  labels:
+    app: mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - port: 27017
+    targetPort: 27017
+    protocol: TCP
+    name: mongodb
+  # selector가 없으면 Endpoints에서 지정한 주소로 라우팅됩니다
