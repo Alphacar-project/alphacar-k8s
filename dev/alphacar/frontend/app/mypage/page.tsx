@@ -228,33 +228,34 @@ function MyPageContent() {
 
   // 견적 개수 가져오기
   useEffect(() => {
-    if (user) {
-      const socialId = localStorage.getItem("user_social_id");
-
-      if (socialId) {
-        fetch(`/api/estimate/count?userId=${socialId}`) // Next.js API Route 사용 (quote-backend)
-          .then(async (res) => {
-            if (!res.ok) {
-              const errData = await res.json();
-              throw new Error(errData.message || "서버 요청 실패");
-            }
-            return res.json();
-          })
-          .then((data) => {
-            console.log("견적 개수 조회 성공:", data);
-            if (typeof data === "number") {
-              setEstimateCount(data);
-            } else {
-              setEstimateCount(0);
-            }
-          })
-          .catch((err) => {
-            console.error("견적 개수 불러오기 실패:", err);
+    // quotes 페이지와 동일하게 localStorage의 user_social_id를 직접 사용
+    const socialId = localStorage.getItem("user_social_id");
+    
+    if (socialId) {
+      fetch(`/api/estimate/count?userId=${socialId}`) // Next.js API Route 사용 (quote-backend)
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.message || "서버 요청 실패");
+          }
+          return res.json();
+        })
+        .then((data) => {
+          console.log("견적 개수 조회 성공:", data);
+          if (typeof data === "number") {
+            setEstimateCount(data);
+          } else {
             setEstimateCount(0);
-          });
-      }
+          }
+        })
+        .catch((err) => {
+          console.error("견적 개수 불러오기 실패:", err);
+          setEstimateCount(0);
+        });
+    } else {
+      setEstimateCount(0);
     }
-  }, [user]);
+  }, []); // quotes 페이지와 동일하게 빈 dependency 배열 사용
 
   const handleLogout = () => {
     setShowLogoutModal(true);
