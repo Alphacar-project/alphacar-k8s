@@ -28,13 +28,29 @@ export default function FavoritePage() {
 
     // 2. 찜 목록 API 호출
     fetch(`/api/favorites/list?userId=${storedUserId}`) // VirtualService /api/favorites 규칙 사용
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`API 응답 실패: ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
-        setFavorites(data);
+        console.log("💖 [찜 목록 페이지] API 응답:", data);
+        // 데이터가 배열인지 확인하고, vehicleId가 populate되었는지 확인
+        if (Array.isArray(data)) {
+          setFavorites(data);
+        } else if (data && Array.isArray(data.favorites)) {
+          // 응답이 { favorites: [...] } 형태일 수 있음
+          setFavorites(data.favorites);
+        } else {
+          console.warn("💖 [찜 목록 페이지] 예상치 못한 데이터 형식:", data);
+          setFavorites([]);
+        }
         setLoading(false);
       })
       .catch((err) => {
-        console.error("찜 목록 로딩 실패:", err);
+        console.error("💖 [찜 목록 페이지] 찜 목록 로딩 실패:", err);
+        setFavorites([]);
         setLoading(false);
       });
   }, [router]);
@@ -53,8 +69,10 @@ export default function FavoritePage() {
 
   // 차량 클릭 핸들러 (모달 열기)
   const handleCarClick = (favItem) => {
-    if (favItem.vehicleId) {
-      setSelectedCar(favItem.vehicleId);
+    // vehicleId가 populate되었는지 확인
+    const car = favItem.vehicleId || favItem.vehicle || favItem;
+    if (car) {
+      setSelectedCar(car);
     }
   };
 
@@ -160,8 +178,12 @@ export default function FavoritePage() {
               }}
             >
               {favorites.map((fav) => {
-                const car = fav.vehicleId; 
-                if (!car) return null;
+                // vehicleId가 populate되었는지 확인
+                const car = fav.vehicleId || fav.vehicle || fav; 
+                if (!car || (!car.name && !car.vehicle_name && !car._id && !car.lineup_id)) {
+                  console.warn("💖 [찜 목록 페이지] 차량 데이터 없음:", fav);
+                  return null;
+                }
 
                 // 🔹 [수정됨] 가격 데이터 우선순위 로직 추가
                 // 1. car.price (최상위 가격)

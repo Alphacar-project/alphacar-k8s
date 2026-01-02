@@ -352,16 +352,12 @@ function HomePageContent() {
     // vehicleId를 문자열로 변환
     const vehicleIdStr = String(vehicleId);
 
-    const nextLikedIds = new Set(likedVehicleIds);
-    if (nextLikedIds.has(vehicleIdStr)) {
-      nextLikedIds.delete(vehicleIdStr);
-    } else {
-      nextLikedIds.add(vehicleIdStr);
-    }
-    setLikedVehicleIds(nextLikedIds);
+    // ✅ 낙관적 업데이트 제거 - 서버 응답 후에만 상태 업데이트
+    // 이전 상태 저장 (에러 시 복구용)
+    const prevLikedIds = new Set(likedVehicleIds);
 
     try {
-      console.log("💖 [하트 클릭] 요청 데이터:", { userId, vehicleId });
+      console.log("💖 [하트 클릭] 요청 데이터:", { userId, vehicleId: vehicleIdStr });
       const res = await fetch('/api/favorites/toggle', { // VirtualService /api/favorites 규칙 사용
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -375,11 +371,13 @@ function HomePageContent() {
       }
       const result = await res.json();
       console.log("💖 [하트 클릭] 성공:", result);
-      // ✅ 성공 후 서버 상태와 동기화
+      // ✅ 성공 후 서버 상태와 동기화 (이것이 실제 상태를 업데이트함)
       await fetchMyFavorites(userId);
     } catch (err) {
       console.error("💖 [하트 클릭] 찜 토글 실패:", err);
-      // 에러 발생 시에도 서버 상태로 복구
+      // 에러 발생 시 이전 상태로 복구
+      setLikedVehicleIds(prevLikedIds);
+      // 서버 상태로 재동기화 시도
       await fetchMyFavorites(userId);
     }
   };

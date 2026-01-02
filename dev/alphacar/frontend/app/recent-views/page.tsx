@@ -22,8 +22,8 @@ export default function RecentViewsPage() {
       }
 
       try {
-        // 2. 백엔드 API 호출 (수정된 vehicle.service.ts 로직 사용)
-        const res = await fetch(`/recent-views?userId=${userId}`); // 직접 경로
+        // 2. 백엔드 API 호출 (Next.js API 프록시 경유)
+        const res = await fetch(`/api/recent-views?userId=${userId}`); // API 프록시 경유
         
         if (!res.ok) throw new Error("데이터를 불러오는데 실패했습니다.");
         
