@@ -203,12 +203,12 @@ def buildService(String appName, String imageName) {
             script {
                 def scannerHome = tool name: 'sonar-scanner'
                 withSonarQubeEnv('sonarqube') {
-                    sh """
+                            sh """
                         ${scannerHome}/bin/sonar-scanner \\
                             -Dsonar.projectKey=${imageName} \\
                             -Dsonar.sources=. \\
                             -Dsonar.host.url=http://localhost:9000 \\
-                            -Dsonar.login=squ_273d18a8d287084a242da2c1ea88fcebc4090873 || echo "⚠️ SonarQube 분석 실패 - 계속 진행"
+                            -Dsonar.token=squ_273d18a8d287084a242da2c1ea88fcebc4090873 || echo "⚠️ SonarQube 분석 실패 - 계속 진행"
                     """
                 }
             }

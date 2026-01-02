@@ -53,30 +53,21 @@ pipeline {
                         return
                     }
                     
-                    // Jenkinsfile 변경 무시
+                    // frontend-Jenkinsfile 변경은 무시하되, 다른 Jenkinsfile 변경은 허용
                     def fileList = changedFiles.split('\n')
-                    def jenkinsfileOnly = true
                     def frontendChanged = false
                     
                     for (file in fileList) {
                         file = file.trim()
-                        if (file.contains('Jenkinsfile') && !file.contains('dev/alphacar/frontend')) {
+                        // frontend-Jenkinsfile 변경은 무시
+                        if (file.contains('frontend-Jenkinsfile') || file.contains('Jenkinsfile.frontend')) {
                             continue
                         }
                         if (file.contains('dev/alphacar/frontend')) {
                             frontendChanged = true
-                            jenkinsfileOnly = false
                             echo "✅ frontend 관련 변경 감지: ${file}"
                             break
                         }
-                        jenkinsfileOnly = false
-                    }
-                    
-                    if (jenkinsfileOnly) {
-                        echo "⏭️ Jenkinsfile만 변경됨 - 빌드 스킵"
-                        currentBuild.result = 'SUCCESS'
-                        currentBuild.displayName = "#${currentBuild.number} (Skipped - Jenkinsfile only)"
-                        return
                     }
                     
                     if (!frontendChanged) {
