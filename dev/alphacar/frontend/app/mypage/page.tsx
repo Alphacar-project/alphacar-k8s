@@ -242,7 +242,11 @@ function MyPageContent() {
         })
         .then((data) => {
           console.log("견적 개수 조회 성공:", data);
-          if (typeof data === "number") {
+          // 백엔드 응답 형식: { count: number }
+          if (data && typeof data.count === "number") {
+            setEstimateCount(data.count);
+          } else if (typeof data === "number") {
+            // 호환성을 위해 숫자로 직접 오는 경우도 처리
             setEstimateCount(data);
           } else {
             setEstimateCount(0);
