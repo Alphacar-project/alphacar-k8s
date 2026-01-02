@@ -79,7 +79,7 @@ export default function FavoritePage() {
   // 차량 클릭 핸들러 - 개별 견적 페이지로 이동
   const handleCarClick = (favItem) => {
     // vehicleId가 populate되었는지 확인
-    const car = favItem.vehicleId || favItem.vehicle || favItem;
+    const car = (favItem.vehicleId && typeof favItem.vehicleId === 'object') ? favItem.vehicleId : favItem;
     if (!car) {
       console.warn("💖 [찜 목록 페이지] 차량 데이터 없음:", favItem);
       alert("차량 정보를 불러올 수 없습니다.");
@@ -106,22 +106,35 @@ export default function FavoritePage() {
     const brandMatch = carName.match(/\[([^\]]+)\]/);
     const brandName = brandMatch ? brandMatch[1] : (car.manufacturer || car.brand_name || "");
 
-    // 차량 ID 추출 (lineup_id 우선, 없으면 vehicleId, _id, id 순서)
+    // 차량 ID 추출 (메인 페이지와 동일한 로직: lineup_id 우선, 없으면 vehicleId, _id, id 순서)
     const trimId = car.lineup_id || car.vehicleId || car._id || car.id || carName;
 
-    console.log("💖 [찜 목록 페이지] 차량 클릭:", { carName, modelName, brandName, trimId, car });
+    // 기본트림명 추출
+    const baseTrimName = car.base_trim_name || car.baseTrimName || "";
 
-    // 개별 견적 페이지로 이동
+    console.log("💖 [찜 목록 페이지] 차량 클릭:", { carName, modelName, brandName, trimId, baseTrimName, car });
+
+    // 개별 견적 페이지로 이동 (제조사, 차종, 기본트림, 세부트림 정보 모두 전달)
     const queryParams = new URLSearchParams();
-    if (trimId) {
-      queryParams.append('trimId', encodeURIComponent(String(trimId)));
-    }
+    
+    // 세부트림 ID (필수)
+    queryParams.append('trimId', encodeURIComponent(String(trimId)));
+    
+    // 차종명 (선택)
     if (modelName) {
       queryParams.append('modelName', encodeURIComponent(modelName));
     }
+    
+    // 제조사명 (선택)
     if (brandName) {
       queryParams.append('brandName', encodeURIComponent(brandName));
     }
+    
+    // 기본트림명 (선택, 있으면 전달)
+    if (baseTrimName) {
+      queryParams.append('baseTrimName', encodeURIComponent(baseTrimName));
+    }
+    
     router.push(`/quote/personal?${queryParams.toString()}`);
   };
 

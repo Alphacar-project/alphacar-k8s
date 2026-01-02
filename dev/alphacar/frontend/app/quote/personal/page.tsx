@@ -704,19 +704,76 @@ function PersonalQuotePageContent() {
     }
   };
 
-  // URL 파라미터에서 trimId와 modelName 읽어서 자동 선택
+  // URL 파라미터에서 trimId, modelName, brandName, baseTrimName 읽어서 자동 선택
   useEffect(() => {
     const trimId = searchParams.get("trimId");
     const modelName = searchParams.get("modelName");
     const brandName = searchParams.get("brandName");
+    const baseTrimName = searchParams.get("baseTrimName");
     
     if (!isAutoSelecting && !carData) {
       setIsAutoSelecting(true);
       
       if (trimId) {
-        // trimId가 있으면 기존 로직 사용
-        handleSelectComplete(trimId, modelName || undefined).finally(() => {
-          setIsAutoSelecting(false);
+        // trimId가 있으면 차량 상세 정보를 가져와서 자동 선택
+        // baseTrimName이 있으면 제조사와 차종을 찾아서 baseTrimId로 변환
+        const convertBaseTrimNameToId = async (): Promise<string | undefined> => {
+          if (!baseTrimName || !modelName || !brandName) return undefined;
+          
+          try {
+            // 1. 제조사 찾기
+            const makersRes = await fetch(`${API_BASE}/vehicles/makers`);
+            const makersData = await makersRes.json();
+            const foundMaker = Array.isArray(makersData) 
+              ? makersData.find((m: Maker) => 
+                  m.name === brandName || 
+                  m.name?.includes(brandName)
+                )
+              : null;
+            
+            if (!foundMaker) return undefined;
+            
+            // 2. 차종 찾기
+            const modelsRes = await fetch(`${API_BASE}/vehicles/models?makerId=${encodeURIComponent(foundMaker._id || "")}`);
+            const modelsData = await modelsRes.json();
+            const foundModel = Array.isArray(modelsData)
+              ? modelsData.find((m: Model) => 
+                  m.model_name === modelName ||
+                  m.name === modelName ||
+                  m.model_name?.includes(modelName) ||
+                  m.name?.includes(modelName)
+                )
+              : null;
+            
+            if (!foundModel) return undefined;
+            
+            // 3. 기본트림 찾기
+            const baseTrimsRes = await fetch(`${API_BASE}/vehicles/base-trims?modelId=${encodeURIComponent(foundModel._id || "")}`);
+            const baseTrimsData = await baseTrimsRes.json();
+            const foundBaseTrim = Array.isArray(baseTrimsData)
+              ? baseTrimsData.find((bt: BaseTrim) => 
+                  bt.base_trim_name === baseTrimName ||
+                  bt.name === baseTrimName
+                )
+              : null;
+            
+            return foundBaseTrim?._id || foundBaseTrim?.id || undefined;
+          } catch (err) {
+            console.error("baseTrimName을 baseTrimId로 변환 실패:", err);
+            return undefined;
+          }
+        };
+        
+        // baseTrimName이 있으면 baseTrimId로 변환, 없으면 undefined
+        convertBaseTrimNameToId().then((baseTrimId) => {
+          handleSelectComplete(trimId, modelName || undefined, baseTrimId).finally(() => {
+            setIsAutoSelecting(false);
+          });
+        }).catch(() => {
+          // 변환 실패 시 baseTrimId 없이 진행
+          handleSelectComplete(trimId, modelName || undefined).finally(() => {
+            setIsAutoSelecting(false);
+          });
         });
       } else if (modelName) {
         // modelName만 있으면 제조사와 차종만 자동 선택

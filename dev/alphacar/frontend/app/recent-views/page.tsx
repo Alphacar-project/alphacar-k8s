@@ -41,28 +41,60 @@ export default function RecentViewsPage() {
 
   // 차량 클릭 시 개별 견적 페이지로 이동
   const handleCarClick = (car: any) => {
-    if (!car || !car.name) {
+    if (!car) {
       alert("차량 정보를 불러올 수 없습니다.");
       return;
     }
-    
-    // 차량 이름에서 모델명 추출 (예: "[현대] 그랜저" -> "그랜저")
-    // 또는 "현대 그랜저" -> "그랜저"
-    let modelName = car.name.replace(/\[[^\]]+\]\s*/, "").trim();
-    // 공백으로 분리하여 첫 번째 단어가 브랜드명일 수 있으므로, 두 번째 단어를 모델명으로 사용
-    const nameParts = modelName.split(/\s+/);
-    if (nameParts.length > 1) {
-      modelName = nameParts[0]; // 첫 번째 단어를 모델명으로 사용
+
+    // 차량 이름 추출
+    const carName = car.name || car.vehicle_name;
+    if (!carName) {
+      console.warn("🚗 [최근 본 차량] 차량 이름 없음:", car);
+      alert("차량 정보를 불러올 수 없습니다.");
+      return;
     }
+
+    // 차량 이름에서 모델명 추출 (예: "[현대] 그랜저" -> "그랜저")
+    let modelName = carName.replace(/\[[^\]]+\]\s*/, "").trim();
+    // 공백으로 분리하여 첫 번째 단어를 모델명으로 사용
+    const nameParts = modelName.split(/\s+/);
+    if (nameParts.length > 0) {
+      modelName = nameParts[0];
+    }
+
+    // 브랜드명 추출
+    const brandMatch = carName.match(/\[([^\]]+)\]/);
+    const brandName = brandMatch ? brandMatch[1] : (car.manufacturer || car.brand_name || "");
+
+    // 차량 ID 추출 (메인 페이지와 동일한 로직: lineup_id 우선, 없으면 vehicleId, _id, id 순서)
+    const trimId = car.lineup_id || car.vehicleId || car._id || car.id || carName;
+
+    // 기본트림명 추출
+    const baseTrimName = car.base_trim_name || car.baseTrimName || "";
+
+    console.log("🚗 [최근 본 차량] 차량 클릭:", { carName, modelName, brandName, trimId, baseTrimName, car });
+
+    // 개별 견적 페이지로 이동 (제조사, 차종, 기본트림, 세부트림 정보 모두 전달)
+    const queryParams = new URLSearchParams();
     
-    // 차량 이름 전체를 trimId로 사용 (백엔드에서 차량 이름으로 검색 가능)
-    const trimId = car.name;
+    // 세부트림 ID (필수)
+    queryParams.append('trimId', encodeURIComponent(String(trimId)));
     
-    // 개별 견적 페이지로 이동 (trimId와 modelName 전달)
-    const queryParams = new URLSearchParams({ trimId: encodeURIComponent(trimId) });
+    // 차종명 (선택)
     if (modelName) {
       queryParams.append('modelName', encodeURIComponent(modelName));
     }
+    
+    // 제조사명 (선택)
+    if (brandName) {
+      queryParams.append('brandName', encodeURIComponent(brandName));
+    }
+    
+    // 기본트림명 (선택, 있으면 전달)
+    if (baseTrimName) {
+      queryParams.append('baseTrimName', encodeURIComponent(baseTrimName));
+    }
+    
     router.push(`/quote/personal?${queryParams.toString()}`);
   };
 

@@ -234,30 +234,62 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
 
   if (!car) return null;
 
-  // ✅ [최종 수정] 이동 로직: 개별 견적 페이지로 이동 (트림 지정 없이 모델만 선택)
+  // ✅ [수정] 개별 견적 페이지로 이동 - 제조사, 차종, 기본트림, 세부트림 정보 전달
   const handleGoToQuoteResult = () => {
     if (!targetId) {
-      // 여전히 ID가 없다면 콘솔에 전체 객체를 찍어서 확인
       console.error("ID Missing in car object:", car);
       alert("차량 ID 정보를 불러오지 못했습니다.");
       return;
     }
 
-    // 차량 이름에서 브랜드명과 모델명 추출 (예: "[기아] 모닝" -> 브랜드: "기아", 모델: "모닝")
+    // 차량 정보 추출 (carDetail 우선, 없으면 car 객체 사용)
     const vehicleName = carDetail?.vehicle_name || car?.vehicle_name || car?.name || "";
     const brandMatch = vehicleName.match(/\[([^\]]+)\]/);
     const brandName = brandMatch ? brandMatch[1] : (carDetail?.brand_name || car?.brand_name || car?.manufacturer || "");
-    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0] || "";
+    
+    // 차종명 추출 (모델명)
+    const extractedModelName = vehicleName.replace(/\[[^\]]+\]\s*/, "").split(" ")[0] || 
+                               carDetail?.model_name || 
+                               car?.model_name || 
+                               "";
 
-    // 개별 견적 페이지로 이동 (트림은 선택되지 않은 상태, 모델만 전달)
+    // 기본트림명 추출
+    const baseTrimName = carDetail?.base_trim_name || car?.base_trim_name || "";
+
+    // 세부트림명 추출
+    const trimName = carDetail?.trim_name || car?.trim_name || carDetail?.name || car?.name || "";
+
+    console.log("🚗 [모달 → 개별견적] 전달 정보:", {
+      trimId: targetId,
+      brandName,
+      modelName: extractedModelName,
+      baseTrimName,
+      trimName,
+      vehicleName,
+      carDetail: carDetail ? Object.keys(carDetail) : null
+    });
+
+    // 개별 견적 페이지로 이동 (제조사, 차종, 기본트림, 세부트림 정보 모두 전달)
     const queryParams = new URLSearchParams();
+    
+    // 세부트림 ID (필수)
+    queryParams.append('trimId', String(targetId));
+    
+    // 차종명 (선택)
     if (extractedModelName) {
       queryParams.append('modelName', extractedModelName);
     }
+    
+    // 제조사명 (선택)
     if (brandName) {
       queryParams.append('brandName', brandName);
     }
-    // trimId는 전달하지 않아서 모델만 선택된 상태로 표시
+    
+    // 기본트림명 (선택, 있으면 전달)
+    if (baseTrimName) {
+      queryParams.append('baseTrimName', baseTrimName);
+    }
+    
     router.push(`/quote/personal?${queryParams.toString()}`);
   };
 
