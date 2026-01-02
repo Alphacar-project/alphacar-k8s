@@ -17,6 +17,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
+# 런타임에 필요한mongodb와ts-node 도구를 명시적으로 설치 
+RUN npm install mongodb ts-node typescript
+
 # 소스 코드 복사 (aichat 디렉토리 전체)
 COPY . .
 
