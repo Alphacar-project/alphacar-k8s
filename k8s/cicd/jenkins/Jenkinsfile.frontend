@@ -83,7 +83,7 @@ pipeline {
             }
         }
 
-        stage('1. Prepare') {
+        stage('1. Prepare & SonarQube') {
             steps {
                 script {
                     // 이미지 태그용 Git SHA 추출
@@ -101,6 +101,28 @@ pipeline {
                     }
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
+                }
+                // SonarQube 분석 (연결 문제 해결됨, 실패해도 계속 진행)
+                dir('dev/alphacar/frontend') {
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        script {
+                            try {
+                                def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                                env.PATH = "${sonarPath}/bin:${env.PATH}"
+                            } catch (Exception e) {
+                                echo "⚠️ SonarQube Scanner 도구를 찾을 수 없습니다. 분석을 건너뜁니다."
+                                return
+                            }
+                        }
+                        withSonarQubeEnv('sonarqube') {
+                            sh """
+                                sonar-scanner \\
+                                    -Dsonar.projectKey=alphacar-frontend \\
+                                    -Dsonar.sources=. \\
+                                    -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || true
+                            """
+                        }
+                    }
                 }
             }
         }
