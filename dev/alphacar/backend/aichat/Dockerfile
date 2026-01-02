@@ -24,7 +24,7 @@ COPY . .
 RUN npm run build
 
 # 프로덕션 의존성만 유지 (선택사항)
-RUN npm prune --production
+# RUN npm prune --production
 
 # 벡터 스토어 디렉토리 생성
 RUN mkdir -p /app/vector_store

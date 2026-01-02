@@ -117,7 +117,7 @@ spec:
             # 확인된 경로: /app/scripts/ingest-data.ts
             if [ -f scripts/ingest-data.ts ]; then
               echo '🚀 npx ts-node를 사용하여 scripts/ingest-data.ts 실행 중...'
-              npx ts-node scripts/ingest-data.ts
+              npx ts-node -T scripts/ingest-data.ts
             else
               echo '❌ 임베딩 스크립트(scripts/ingest-data.ts) 발견 실패'
             fi
