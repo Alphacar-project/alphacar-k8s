@@ -140,13 +140,19 @@ function HomePageContent() {
         const data = await res.json();
         console.log("💖 [fetchMyFavorites] 찜 목록 응답:", data);
         // vehicleId가 populate된 경우 lineup_id를 우선 사용, 없으면 _id 사용
-        const ids = new Set<string>(data.map((item: any) => {
-          if (!item.vehicleId) return null;
+        const ids = new Set<string>();
+        data.forEach((item: any) => {
+          if (!item.vehicleId) return;
           // lineup_id가 있으면 lineup_id 사용 (문자열), 없으면 _id 사용 (ObjectId 문자열)
-          const id = item.vehicleId.lineup_id || (item.vehicleId._id ? String(item.vehicleId._id) : null);
-          console.log("💖 [fetchMyFavorites] 추출된 ID:", id, "from vehicleId:", item.vehicleId);
-          return id;
-        }).filter((id: any) => id) as string[]);
+          const lineupId = item.vehicleId.lineup_id ? String(item.vehicleId.lineup_id) : null;
+          const objectId = item.vehicleId._id ? String(item.vehicleId._id) : null;
+          
+          // 둘 다 추가하여 ID 형식이 달라도 매칭되도록
+          if (lineupId) ids.add(lineupId);
+          if (objectId) ids.add(objectId);
+          
+          console.log("💖 [fetchMyFavorites] 추출된 ID:", { lineupId, objectId }, "from vehicleId:", item.vehicleId);
+        });
         console.log("💖 [fetchMyFavorites] 최종 찜 ID 목록:", Array.from(ids));
         setLikedVehicleIds(ids);
       } else {
@@ -337,7 +343,8 @@ function HomePageContent() {
       alert("로그인이 필요합니다.");
       return;
     }
-    const vehicleId = car.vehicleId || car._id || car.id;
+    // 차량 ID 추출: lineup_id 우선, 없으면 vehicleId, _id, id 순서
+    const vehicleId = car.lineup_id || car.vehicleId || car._id || car.id;
     if (!vehicleId) {
       console.error("차량 ID를 찾을 수 없습니다:", car);
       return;
@@ -368,9 +375,12 @@ function HomePageContent() {
       }
       const result = await res.json();
       console.log("💖 [하트 클릭] 성공:", result);
+      // ✅ 성공 후 서버 상태와 동기화
+      await fetchMyFavorites(userId);
     } catch (err) {
       console.error("💖 [하트 클릭] 찜 토글 실패:", err);
-      fetchMyFavorites(userId);
+      // 에러 발생 시에도 서버 상태로 복구
+      await fetchMyFavorites(userId);
     }
   };
 
@@ -562,10 +572,15 @@ function HomePageContent() {
             {!loading && filteredCars.length === 0 && <p style={{ gridColumn: "1/-1", textAlign: "center" }}>차량이 없습니다.</p>}
 
             {paginatedCars.map((car, idx) => {
-              const vehicleId = car.vehicleId || car._id || car.id;
-              // vehicleId를 문자열로 변환하여 비교 (lineup_id는 이미 문자열)
+              // 차량 ID 추출: lineup_id 우선, 없으면 vehicleId, _id, id 순서
+              const vehicleId = car.lineup_id || car.vehicleId || car._id || car.id;
+              // vehicleId를 문자열로 변환하여 비교
               const vehicleIdStr = String(vehicleId);
-              const isLiked = likedVehicleIds.has(vehicleIdStr);
+              // lineup_id와 _id 모두 체크하여 매칭
+              const isLiked = likedVehicleIds.has(vehicleIdStr) || 
+                             (car.lineup_id && likedVehicleIds.has(String(car.lineup_id))) ||
+                             (car._id && likedVehicleIds.has(String(car._id))) ||
+                             (car.vehicleId && likedVehicleIds.has(String(car.vehicleId)));
 
               return (
                 <div

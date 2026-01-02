@@ -191,7 +191,7 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
 
     if (storedUserId && targetId) {
       // 조회수 기록
-      fetch(`/log-view/${targetId}`, { // VirtualService 직접 경로
+      fetch(`/api/log-view/${targetId}`, { // Next.js API 프록시 경유
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: storedUserId })
