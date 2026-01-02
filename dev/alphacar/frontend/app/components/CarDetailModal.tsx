@@ -221,6 +221,11 @@ export default function CarDetailModal({ car, onClose }: CarDetailModalProps) {
         body: JSON.stringify({ userId, vehicleId: targetId })
       });
       if (!res.ok) throw new Error("API 오류");
+      
+      // ✅ 메인페이지 상태 업데이트를 위한 이벤트 발생
+      window.dispatchEvent(new CustomEvent("favoriteToggled", { 
+        detail: { vehicleId: targetId, isLiked: !prevLiked } 
+      }));
     } catch (err) {
       console.error("찜하기 실패:", err);
       setIsLiked(prevLiked);

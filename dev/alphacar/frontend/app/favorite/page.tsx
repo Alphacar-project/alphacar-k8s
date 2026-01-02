@@ -162,8 +162,23 @@ export default function FavoritePage() {
             {favorites.map((fav, idx) => {
               // vehicleId가 populate되었는지 확인
               const car = fav.vehicleId || fav.vehicle || fav;
-              if (!car || (!car.name && !car.vehicle_name && !car._id && !car.lineup_id)) {
-                console.warn("💖 [찜 목록 페이지] 차량 데이터 없음:", fav);
+              
+              // 디버깅: fav와 car 객체 확인
+              console.log("💖 [찜 목록 페이지] fav 객체:", fav);
+              console.log("💖 [찜 목록 페이지] car 객체:", car);
+              
+              // 차량 데이터가 없거나 필수 필드가 없는 경우
+              if (!car) {
+                console.warn("💖 [찜 목록 페이지] 차량 데이터 없음 (car가 null):", fav);
+                return null;
+              }
+              
+              // 차량 이름이나 ID가 하나라도 있으면 표시
+              const hasName = car.name || car.vehicle_name;
+              const hasId = car._id || car.lineup_id || car.vehicleId || car.id;
+              
+              if (!hasName && !hasId) {
+                console.warn("💖 [찜 목록 페이지] 차량 이름/ID 모두 없음:", fav, car);
                 return null;
               }
 

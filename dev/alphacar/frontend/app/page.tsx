@@ -169,6 +169,21 @@ function HomePageContent() {
     }
   }, [userId, fetchMyFavorites]);
 
+  // ✅ 모달에서 찜 토글 시 메인페이지 상태 업데이트
+  useEffect(() => {
+    const handleFavoriteToggled = (e: CustomEvent) => {
+      if (userId) {
+        console.log("💖 [메인페이지] 모달에서 찜 토글 이벤트 수신:", e.detail);
+        fetchMyFavorites(userId);
+      }
+    };
+    
+    window.addEventListener("favoriteToggled", handleFavoriteToggled as EventListener);
+    return () => {
+      window.removeEventListener("favoriteToggled", handleFavoriteToggled as EventListener);
+    };
+  }, [userId, fetchMyFavorites]);
+
   useEffect(() => {
     const timer = setInterval(() => setBannerIndex((prev) => (prev + 1) % bannerItems.length), 4000);
     return () => clearInterval(timer);
