@@ -106,36 +106,37 @@ spec:
         - name: vector-store
           mountPath: /app/vector_store
 
-        # 🛠️ [수정 완료] 경로 최적화 및 실행 스크립트 수정
+        # 🛠️ [RAG 임베딩 해결] npx ts-node 및 정확한 .ts 경로 반영
         command: ["/bin/sh", "-c"]
         args:
         - |
           mkdir -p /app/vector_store
-          # 벡터 스토어 체크 (데이터가 없거나 파일이 너무 작으면 임베딩 수행)
           if [ ! -f /app/vector_store/docstore.json ] || [ ! -s /app/vector_store/docstore.json ] || [ $(wc -c < /app/vector_store/docstore.json) -lt 500 ]; then
             echo '🔄 벡터 스토어가 없거나 비어있습니다. 임베딩을 시작합니다...'
             cd /app
-            if [ -f dist/scripts/ingest-data.js ]; then
-              node dist/scripts/ingest-data.js
+            # 확인된 경로: /app/scripts/ingest-data.ts
+            if [ -f scripts/ingest-data.ts ]; then
+              echo '🚀 npx ts-node를 사용하여 scripts/ingest-data.ts 실행 중...'
+              npx ts-node scripts/ingest-data.ts
             else
-              echo '❌ 임베딩 스크립트 발견 실패'
+              echo '❌ 임베딩 스크립트(scripts/ingest-data.ts) 발견 실패'
             fi
             echo '✅ 임베딩 완료'
           else
             echo '✅ 벡터 스토어가 이미 존재합니다.'
           fi
-          # 아까 확인한 실제 경로 (/app/dist/src/main.js) 사용
+          # 메인 애플리케이션 실행
           node /app/dist/src/main.js
 
         livenessProbe:
           tcpSocket:
             port: 4000
-          initialDelaySeconds: 60 # 임베딩 시간을 고려하여 여유 있게 설정
+          initialDelaySeconds: 120 # 임베딩 시간이 걸리므로 대기 시간 연장
           periodSeconds: 15
         readinessProbe:
           tcpSocket:
             port: 4000
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 10
 
         resources:
