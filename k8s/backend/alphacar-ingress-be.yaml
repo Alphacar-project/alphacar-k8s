@@ -14,7 +14,7 @@ spec:
     http:
       paths:
       # [1] Chat Backend
-      - path: /api/chat
+      - path: /api/chat/ask
         pathType: Prefix
         backend:
           service:
