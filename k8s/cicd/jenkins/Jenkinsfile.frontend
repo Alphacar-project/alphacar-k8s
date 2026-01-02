@@ -1,0 +1,197 @@
+pipeline {
+    agent any
+
+    environment {
+        ECR_REGISTRY = '382045063773.dkr.ecr.ap-northeast-2.amazonaws.com'
+        AWS_REGION = 'ap-northeast-2'
+        IMAGE_NAME = 'alphacar/frontend'
+        SERVICE_NAME = 'frontend'
+
+        // Argo CD 매니페스트 저장소
+        MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
+
+        GIT_CREDENTIAL_ID = 'github-cred'
+    }
+
+    stages {
+        stage('0. Check Changes') {
+            steps {
+                script {
+                    cleanWs()
+                    checkout scm
+                    
+                    echo "🔍 변경된 파일 확인 중..."
+                    
+                    // [skip ci] 커밋 체크
+                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    echo "커밋 메시지: ${commitMessage}"
+                    
+                    if (commitMessage.contains('[skip ci]')) {
+                        echo "⏭️ [skip ci] 커밋 감지 - 빌드를 스킵합니다."
+                        currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - [skip ci])"
+                        return
+                    }
+                    
+                    // 변경 파일 확인
+                    def changedFiles = sh(script: 'git diff --name-only HEAD~1 HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                    
+                    // 변경 파일이 없으면 최근 2개 커밋 비교
+                    if (!changedFiles || changedFiles.trim().isEmpty()) {
+                        def recentCommits = sh(script: 'git log -2 --pretty=%H', returnStdout: true).trim().split('\n')
+                        if (recentCommits.size() >= 2) {
+                            changedFiles = sh(script: "git diff --name-only ${recentCommits[1]} ${recentCommits[0]} 2>/dev/null || echo \"\"", returnStdout: true).trim()
+                        }
+                    }
+                    
+                    echo "변경된 파일:\n${changedFiles}"
+                    
+                    if (!changedFiles || changedFiles.trim().isEmpty()) {
+                        echo "⚠️ 변경된 파일이 없습니다."
+                        currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No changes)"
+                        return
+                    }
+                    
+                    // frontend-Jenkinsfile 변경은 무시하되, 다른 Jenkinsfile 변경은 허용
+                    def fileList = changedFiles.split('\n')
+                    def frontendChanged = false
+                    
+                    for (file in fileList) {
+                        file = file.trim()
+                        // frontend-Jenkinsfile 변경은 무시
+                        if (file.contains('frontend-Jenkinsfile') || file.contains('Jenkinsfile.frontend')) {
+                            continue
+                        }
+                        if (file.contains('dev/alphacar/frontend')) {
+                            frontendChanged = true
+                            echo "✅ frontend 관련 변경 감지: ${file}"
+                            break
+                        }
+                    }
+                    
+                    if (!frontendChanged) {
+                        echo "⏭️ frontend 경로 변경사항이 없습니다. 빌드를 스킵합니다."
+                        echo "변경된 경로:\n${changedFiles}"
+                        currentBuild.result = 'SUCCESS'
+                        currentBuild.displayName = "#${currentBuild.number} (Skipped - No frontend changes)"
+                        return
+                    }
+                    
+                    echo "✅ frontend 변경사항 확인됨 - 빌드 진행"
+                }
+            }
+        }
+
+        stage('1. Prepare') {
+            steps {
+                script {
+                    // 이미지 태그용 Git SHA 추출
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    
+                    // 버전 정보 설정
+                    def baseVer = "1.0"
+                    def versionPath = 'dev/alphacar/frontend/version.txt'
+                    try {
+                        if (fileExists(versionPath)) {
+                            baseVer = readFile(versionPath).trim()
+                        }
+                    } catch (e) {
+                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
+                    }
+                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    echo "📦 빌드 버전: ${env.FULL_VERSION}"
+                }
+            }
+        }
+
+        stage('2. Build & Push to ECR') {
+            steps {
+                script {
+                    echo "🔨 프론트엔드 빌드 시작 (경로: dev/alphacar/frontend)"
+
+                    // Dockerfile이 있는 실제 경로로 이동하여 빌드 및 푸시
+                    dir('dev/alphacar/frontend') {
+                        def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+                        echo "🐳 도커 빌드 시작: ${imageFullTag}"
+                        
+                        sh "docker build -f Dockerfile -t ${imageFullTag} ."
+
+                        // AWS ECR 로그인
+                        script {
+                            def awsPath = sh(script: 'which aws || echo /usr/local/bin/aws', returnStdout: true).trim()
+                            if (!awsPath || !fileExists(awsPath)) {
+                                error "AWS CLI not found. Please install AWS CLI on the Jenkins server."
+                            }
+                            sh """
+                                ${awsPath} ecr get-login-password --region ${AWS_REGION} | \\
+                                docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            """
+                        }
+                        
+                        sh "docker push ${imageFullTag}"
+                        sh "docker logout ${ECR_REGISTRY}"
+                        
+                        echo "✅ ECR 푸시 완료: ${imageFullTag}"
+                    }
+                }
+            }
+        }
+
+        stage('3. Update Manifests (GitOps)') {
+            steps {
+                script {
+                    echo "🚀 [GitOps] 프론트엔드 Manifest 업데이트 시작"
+                    
+                    // 현재 저장소의 매니페스트 파일 직접 업데이트
+                    def yamlPath = "k8s/frontend/frontend-deployment-multimaster.yaml"
+                    def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
+
+                    // 파일 존재 확인
+                    if (!fileExists(yamlPath)) {
+                        error "❌ 매니페스트 파일을 찾을 수 없습니다: ${yamlPath}"
+                    }
+
+                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
+                    
+                    // ECR 이미지 경로로 업데이트
+                    sh """
+                        sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
+                    """
+                    
+                    // Git 커밋 및 푸시
+                    withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                        sh """
+                            git config user.email "jenkins@alphacar.com"
+                            git config user.name "Jenkins-CI"
+                            git add ${yamlPath}
+                            
+                            # 변경사항이 있을 때만 커밋
+                            if [ -n "\$(git status --porcelain)" ]; then
+                                git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
+                                echo "✅ 로컬 커밋 완료"
+                                
+                                # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
+                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
+                            else
+                                echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh """
+                docker image prune -f || true
+                docker container prune -f || true
+                docker builder prune -f || true
+            """
+            cleanWs()
+        }
+    }
+}
