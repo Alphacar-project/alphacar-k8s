@@ -193,6 +193,10 @@ pipeline {
                                 git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                 echo "✅ 로컬 커밋 완료"
                                 
+                                # 원격 저장소의 최신 변경사항 가져오기 및 병합
+                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main
+                                git rebase origin/main || git rebase --abort
+                                
                                 # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
                                 git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
                                 echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
