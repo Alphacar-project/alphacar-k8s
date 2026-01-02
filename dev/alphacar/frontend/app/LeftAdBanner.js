@@ -1,8 +1,11 @@
 // app/LeftAdBanner.js
+
 "use client";
 
 import { useEffect, useState } from "react";
+
 import Link from "next/link";
+
 import { usePathname } from "next/navigation";
 
 // 👉 화면 가로폭이 1700px 미만이면 배너 숨김 (기존 유지)
