@@ -28,14 +28,38 @@ export default function FavoritePage() {
 
     // 2. 찜 목록 API 호출
     fetch(`/api/favorites/list?userId=${storedUserId}`) // VirtualService /api/favorites 규칙 사용
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`API 응답 실패: ${res.status}`);
+        }
+        return res.json();
+      })
       .then((data) => {
-        console.log("💖 [찜 목록 페이지] API 응답:", data);
-        setFavorites(data);
+        console.log("💖 [찜 목록 페이지] API 응답 원본:", data);
+        console.log("💖 [찜 목록 페이지] 데이터 타입:", Array.isArray(data) ? "배열" : typeof data);
+        console.log("💖 [찜 목록 페이지] 데이터 길이:", Array.isArray(data) ? data.length : "배열 아님");
+        
+        // 데이터가 배열인지 확인
+        if (Array.isArray(data)) {
+          // 각 항목의 vehicleId populate 여부 확인
+          data.forEach((fav, idx) => {
+            console.log(`💖 [찜 목록 페이지] 항목 ${idx}:`, {
+              _id: fav._id,
+              hasVehicleId: !!fav.vehicleId,
+              vehicleIdType: typeof fav.vehicleId,
+              vehicleId: fav.vehicleId
+            });
+          });
+          setFavorites(data);
+        } else {
+          console.warn("💖 [찜 목록 페이지] 예상치 못한 데이터 형식:", data);
+          setFavorites([]);
+        }
         setLoading(false);
       })
       .catch((err) => {
         console.error("💖 [찜 목록 페이지] 찜 목록 로딩 실패:", err);
+        setFavorites([]);
         setLoading(false);
       });
   }, [router]);
@@ -203,8 +227,16 @@ export default function FavoritePage() {
               }}
             >
               {favorites.map((fav) => {
-                const car = fav.vehicleId; 
-                if (!car) return null;
+                // API 응답 구조: vehicleId가 문자열이고 차량 데이터가 같은 레벨에 있음
+                // { _id, vehicleId: 'string', vehicle_name, brand_name, imageUrl, price, lineup_id, ... }
+                // vehicleId가 객체로 populate된 경우와 문자열인 경우 모두 처리
+                const car = (fav.vehicleId && typeof fav.vehicleId === 'object') ? fav.vehicleId : fav;
+                
+                // 차량 데이터 검증: vehicle_name 또는 name이 있어야 함
+                if (!car || (!car.vehicle_name && !car.name)) {
+                  console.warn("💖 [찜 목록 렌더링] 차량 이름이 없습니다:", fav);
+                  return null;
+                }
 
                 // 🔹 [수정됨] 가격 데이터 우선순위 로직 추가
                 // 1. car.price (최상위 가격)

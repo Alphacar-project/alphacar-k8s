@@ -139,24 +139,32 @@ function HomePageContent() {
       if (res.ok) {
         const data = await res.json();
         console.log("💖 [fetchMyFavorites] 찜 목록 응답:", data);
-        // vehicleId가 populate된 경우 모든 가능한 ID 형식 추가
+        // API 응답 구조: vehicleId가 문자열이고 차량 데이터가 같은 레벨에 있음
+        // { _id, vehicleId: 'string', vehicle_name, brand_name, imageUrl, price, lineup_id, ... }
         const ids = new Set<string>();
         data.forEach((item: any) => {
-          if (!item.vehicleId) return;
-          const vehicle = item.vehicleId;
-          
-          // 모든 가능한 ID 형식 추가 (lineup_id, _id, vehicleId, id)
-          if (vehicle.lineup_id) ids.add(String(vehicle.lineup_id));
-          if (vehicle._id) ids.add(String(vehicle._id));
-          if (vehicle.vehicleId) ids.add(String(vehicle.vehicleId));
-          if (vehicle.id) ids.add(String(vehicle.id));
+          // vehicleId가 객체인 경우 (populate된 경우)
+          if (item.vehicleId && typeof item.vehicleId === 'object') {
+            const vehicle = item.vehicleId;
+            if (vehicle.lineup_id) ids.add(String(vehicle.lineup_id));
+            if (vehicle._id) ids.add(String(vehicle._id));
+            if (vehicle.vehicleId) ids.add(String(vehicle.vehicleId));
+            if (vehicle.id) ids.add(String(vehicle.id));
+          } else {
+            // vehicleId가 문자열이거나 차량 데이터가 같은 레벨에 있는 경우
+            // item 자체가 차량 데이터이므로 item의 ID들을 사용
+            if (item.lineup_id) ids.add(String(item.lineup_id));
+            if (item._id) ids.add(String(item._id));
+            if (item.vehicleId && typeof item.vehicleId === 'string') ids.add(String(item.vehicleId));
+            if (item.id) ids.add(String(item.id));
+          }
           
           console.log("💖 [fetchMyFavorites] 추출된 ID:", { 
-            lineup_id: vehicle.lineup_id, 
-            _id: vehicle._id, 
-            vehicleId: vehicle.vehicleId,
-            id: vehicle.id
-          }, "from vehicleId:", vehicle);
+            lineup_id: item.lineup_id || (item.vehicleId?.lineup_id),
+            _id: item._id || (item.vehicleId?._id),
+            vehicleId: typeof item.vehicleId === 'string' ? item.vehicleId : (item.vehicleId?.vehicleId),
+            id: item.id || (item.vehicleId?.id)
+          }, "from item:", item);
         });
         console.log("💖 [fetchMyFavorites] 최종 찜 ID 목록:", Array.from(ids));
         setLikedVehicleIds(ids);
@@ -179,7 +187,18 @@ function HomePageContent() {
     const handleFavoriteToggled = (e: CustomEvent) => {
       if (userId) {
         console.log("💖 [메인페이지] 모달에서 찜 토글 이벤트 수신:", e.detail);
-        fetchMyFavorites(userId);
+        const { vehicleId, isLiked } = e.detail;
+        
+        // 낙관적 업데이트: 모달에서 변경된 상태를 즉시 반영
+        setLikedVehicleIds(prev => {
+          const next = new Set(prev);
+          if (isLiked) {
+            next.add(String(vehicleId));
+          } else {
+            next.delete(String(vehicleId));
+          }
+          return next;
+        });
       }
     };
     
@@ -187,7 +206,7 @@ function HomePageContent() {
     return () => {
       window.removeEventListener("favoriteToggled", handleFavoriteToggled as EventListener);
     };
-  }, [userId, fetchMyFavorites]);
+  }, [userId]);
 
   useEffect(() => {
     const timer = setInterval(() => setBannerIndex((prev) => (prev + 1) % bannerItems.length), 4000);
@@ -404,16 +423,18 @@ function HomePageContent() {
       if (!res.ok) {
         const errorText = await res.text();
         console.error("💖 [하트 클릭] API 실패 상세:", errorText);
+        // 에러 발생 시 낙관적 업데이트 롤백
+        setLikedVehicleIds(likedVehicleIds);
         throw new Error(`API Fail: ${res.status} ${res.statusText} - ${errorText}`);
       }
       const result = await res.json();
       console.log("💖 [하트 클릭] 성공:", result);
-      // ✅ 성공 후 서버 상태와 동기화 (ID 형식 차이 보정)
-      await fetchMyFavorites(userId);
+      // ✅ 성공 시 낙관적 업데이트 유지 (fetchMyFavorites 호출하지 않음)
+      // 낙관적 업데이트가 이미 정확하므로 서버 동기화 불필요
     } catch (err) {
       console.error("💖 [하트 클릭] 찜 토글 실패:", err);
-      // 에러 발생 시 서버 상태로 재동기화 (낙관적 업데이트 롤백)
-      await fetchMyFavorites(userId);
+      // 에러 발생 시 낙관적 업데이트 롤백
+      setLikedVehicleIds(likedVehicleIds);
     }
   };
 
