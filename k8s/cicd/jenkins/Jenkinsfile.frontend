@@ -115,12 +115,17 @@ pipeline {
                 dir('dev/alphacar/frontend') {
                     catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                         script {
-                            def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                            env.PATH = "${sonarPath}/bin:${env.PATH}"
+                            try {
+                                def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                                env.PATH = "${sonarPath}/bin:${env.PATH}"
+                            } catch (Exception e) {
+                                echo "⚠️ SonarQube Scanner 도구를 찾을 수 없습니다. 분석을 건너뜁니다."
+                                return
+                            }
                         }
                         withSonarQubeEnv('sonarqube') {
                             sh """
-                                sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || echo "⚠️ SonarQube 분석 실패 - 계속 진행"
+                                sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || true
                             """
                         }
                     }
