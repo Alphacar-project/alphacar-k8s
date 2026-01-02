@@ -12,54 +12,56 @@ const trendArticles = [
     title: "겨울에 디젤차가 유독 추운 이유, 가솔린과 비교해봤어요",
     bgColor: "#ffe5e5",
     icon: "🌡️",
+    image: "/news/thermometer.png", // 첫 번째 이미지: 온도계 (빨간색과 파란색)
   },
   {
     id: 2,
     title: "운전자보다 똑똑한 자동차 비서, BMW AI 기반 '프로액티브 케어' 국내 도입",
     bgColor: "#1a1a2e",
     icon: "🤖",
-    image: "/news/bmw-ai-robot.png", // 이미지 경로 추가
+    image: "/news/bmw-ai-robot.png", // 두 번째 이미지: 로봇
   },
   {
     id: 3,
     title: "2025년 11월 수입차 판매량 Top 3",
     bgColor: "#e8d5ff",
     icon: "📊",
-    image: "/news/car-sales-nov.png", // 첫 번째 이미지
+    image: "/news/car-sales-nov.png", // 세 번째 이미지: Top 3 배지
   },
   {
     id: 4,
     title: "2025년 10월 수입차 판매량 Top 3",
     bgColor: "#e8d5ff",
     icon: "📊",
-    image: "/news/car-sales-oct.png", // 첫 번째 이미지 (같은 이미지 사용)
+    image: "/news/car-sales-oct.png", // 네 번째 이미지: Top 3 배지
   },
   {
     id: 5,
     title: "2026년 유류세 인하폭 축소로 주유비는 얼마나 오르나? 정책 변화 완전정리",
     bgColor: "#2d2d2d",
     icon: "⛽",
-    image: "/news/fuel-price.png", // 두 번째 이미지 (주유기 노즐)
+    image: "/news/fuel-price.png", // 다섯 번째 이미지: 주유기
   },
   {
     id: 6,
     title: "터치스크린 시대 끝나가나? 차량 UI에서 버튼이 돌아온다",
     bgColor: "#ffe5e5",
     icon: "🔴",
-    image: "/news/red-button.png", // 세 번째 이미지 (빨간 버튼)
+    image: "/news/red-button.png", // 여섯 번째 이미지: 빨간 버튼
   },
   {
     id: 7,
     title: "자동차 vs 우주, 기업들이 위성망을 쏘아 올리는 이유",
     bgColor: "#1a1a3e",
     icon: "🛰️",
+    image: "/news/satellite.png", // 일곱 번째 이미지: 위성
   },
   {
     id: 8,
     title: "자동차 사이버보안, AI가 지키는 미래차 안전",
     bgColor: "#e0f2fe",
     icon: "🛡️",
-    image: "/news/cybersecurity-shield.png", // 네 번째 이미지 (방패 아이콘)
+    image: "/news/cybersecurity-shield.png", // 여덟 번째 이미지: 사이버보안 방패
   },
 ];
 
@@ -308,7 +310,7 @@ export default function NewsPage() {
           style={{
             backgroundColor: "#fff7e6",
             borderRadius: "10px",
-            padding: "24px 20px 28px",
+            padding: "20px 16px",
           }}
         >
           {/* 타이틀 */}
@@ -366,9 +368,9 @@ export default function NewsPage() {
           {/* 카드 리스트 */}
           <div
             style={{
-              display: "flex",
-              gap: "16px",
-              overflowX: "auto",
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: "12px",
             }}
           >
             {driveCourseCards.map((card) => (
@@ -376,14 +378,14 @@ export default function NewsPage() {
                 key={card.id}
                 href={`/news/drive/${card.driveCourseId}`}
                 style={{
-                  flex: "0 0 210px",
                   backgroundColor: "#fff",
                   borderRadius: "12px",
                   boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-                  padding: "12px 12px 14px",
+                  padding: "8px",
                   textDecoration: "none",
                   color: "inherit",
-                  display: "block",
+                  display: "flex",
+                  flexDirection: "column",
                   transition: "all 0.3s ease",
                   cursor: "pointer",
                   border: "1px solid #e2e8f0",
@@ -402,9 +404,9 @@ export default function NewsPage() {
                 <div
                   style={{
                     width: "100%",
-                    height: "120px",
+                    aspectRatio: "16/10",
                     borderRadius: "8px",
-                    marginBottom: "10px",
+                    marginBottom: "8px",
                     background:
                       "linear-gradient(135deg, #e0f2fe, #bae6fd)",
                     display: "flex",
@@ -466,9 +468,10 @@ export default function NewsPage() {
                   style={{
                     fontSize: "14px",
                     fontWeight: 700,
-                    marginBottom: "6px",
+                    marginBottom: "4px",
                     lineHeight: 1.4,
                     color: "#1e293b",
+                    padding: "0 4px",
                   }}
                 >
                   {card.title}
@@ -477,8 +480,9 @@ export default function NewsPage() {
                   style={{
                     fontSize: "12px",
                     color: "#666",
-                    marginBottom: "8px",
+                    marginBottom: "6px",
                     lineHeight: 1.5,
+                    padding: "0 4px",
                   }}
                 >
                   {card.desc}
@@ -487,6 +491,7 @@ export default function NewsPage() {
                   style={{
                     fontSize: "11px",
                     color: "#999",
+                    padding: "0 4px",
                   }}
                 >
                   {card.tag}

@@ -7,9 +7,14 @@ import { usePathname } from "next/navigation";
 
 // 👉 화면 가로폭이 1700px 미만이면 배너 숨김 (기존 유지)
 const HIDE_WIDTH = 1700;
+// 헤더 높이 (GlobalHeader.tsx의 HEADER_HEIGHT와 동일)
+const HEADER_HEIGHT = 124;
+// 배너 초기 위치 (더 위로 이동)
+const INITIAL_TOP = 200;
 
 export default function LeftAdBanner() {
   const [isHidden, setIsHidden] = useState(false);
+  const [scrollY, setScrollY] = useState(0);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -23,21 +28,37 @@ export default function LeftAdBanner() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    const handleScroll = () => {
+      if (typeof window !== "undefined") {
+        setScrollY(window.scrollY);
+      }
+    };
+    
+    if (typeof window !== "undefined") {
+      setScrollY(window.scrollY);
+      window.addEventListener("scroll", handleScroll);
+      return () => window.removeEventListener("scroll", handleScroll);
+    }
+  }, []);
+
   if (isHidden || pathname === "/space-game") return null;
+
+  // 스크롤 위치에 따라 배너의 top 위치 계산
+  // 헤더가 배너에 닿으면 (스크롤이 INITIAL_TOP - HEADER_HEIGHT를 넘으면) 헤더 바로 아래에 고정
+  const bannerTop = scrollY > INITIAL_TOP - HEADER_HEIGHT 
+    ? scrollY + HEADER_HEIGHT + 20  // 헤더 바로 아래에 고정 (20px 여백)
+    : INITIAL_TOP + scrollY;  // 스크롤과 함께 내려감
 
   return (
     <div
       style={{
-        position: "fixed",
+        position: "absolute",
         left: "50%",
         marginLeft: "-860px", // (기존 유지) 가로 위치 조절
-        
-        // 👉 [수정 포인트] 세로 위치 조절
-        top: "50%", // 화면 세로 중앙을 기준으로 잡고
-        // transform: "translateY(-50%)", // ← 이 줄을 지우거나 주석 처리합니다. (완전 중앙 정렬 해제)
-        marginTop: "-70px", // ← 중앙 지점에서 80px 만큼 아래로 내립니다.
-        
+        top: `${bannerTop}px`,
         zIndex: 40,
+        transition: "top 0.1s ease-out",
       }}
     >
       <Link
