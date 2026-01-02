@@ -23,17 +23,17 @@ async function bootstrap() {
   const app = await NestFactory.createApplicationContext(ChatModule);
   const chatService = app.get(ChatService);
 
-  // MongoDB Replica Set 연결 (모든 노드 포함)
+  // MongoDB 연결 (EC2 단일 인스턴스 또는 Replica Set)
   const host = process.env.DATABASE_HOST || 'mongodb.apc-db-ns.svc.cluster.local';
   const port = process.env.DATABASE_PORT || '27017';
   
-  // Replica Set을 사용하는 경우 모든 노드를 포함
+  // Replica Set을 사용하는 경우 모든 노드를 포함 (mongodb-headless 서비스만)
   let mongoUrl: string;
-  if (host.includes('mongodb.apc-db-ns') || host.includes('mongodb-headless')) {
-    // Replica Set 연결 문자열 구성
+  if (host.includes('mongodb-headless')) {
+    // Replica Set 연결 문자열 구성 (StatefulSet의 headless service 사용)
     mongoUrl = `mongodb://${process.env.DATABASE_USER}:${process.env.DATABASE_PASSWORD}@mongodb-0.mongodb-headless.apc-db-ns.svc.cluster.local:${port},mongodb-1.mongodb-headless.apc-db-ns.svc.cluster.local:${port},mongodb-2.mongodb-headless.apc-db-ns.svc.cluster.local:${port}/?authSource=admin&replicaSet=rs0&serverSelectionTimeoutMS=60000`;
   } else {
-    // 단일 호스트 연결 (replica set 없음)
+    // 단일 호스트 연결 (EC2 MongoDB 또는 일반 서비스)
     mongoUrl = `mongodb://${process.env.DATABASE_USER}:${process.env.DATABASE_PASSWORD}@${host}:${port}/?authSource=admin&serverSelectionTimeoutMS=60000`;
   }
   
