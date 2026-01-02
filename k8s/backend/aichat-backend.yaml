@@ -128,16 +128,14 @@ spec:
           node /app/dist/src/main.js
 
         livenessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 4000
-          initialDelaySeconds: 80 # 임베딩 시간을 고려하여 여유 있게 설정
+          initialDelaySeconds: 60 # 임베딩 시간을 고려하여 여유 있게 설정
           periodSeconds: 15
         readinessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 4000
-          initialDelaySeconds: 40
+          initialDelaySeconds: 30
           periodSeconds: 10
 
         resources:
