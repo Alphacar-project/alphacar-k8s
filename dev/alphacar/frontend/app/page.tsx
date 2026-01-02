@@ -107,6 +107,8 @@ function HomePageContent() {
 
   const [domesticTop5, setDomesticTop5] = useState<any[]>([]);
   const [foreignTop5, setForeignTop5] = useState<any[]>([]);
+  const [prevDomesticTop5, setPrevDomesticTop5] = useState<any[]>([]);
+  const [prevForeignTop5, setPrevForeignTop5] = useState<any[]>([]);
 
   const [selectedBrand, setSelectedBrand] = useState("전체");
   const [searchText, setSearchText] = useState("");
@@ -183,8 +185,22 @@ function HomePageContent() {
             total: item.previous_year && item.previous_year.sales ? item.previous_year.sales.toLocaleString() : "-"
           }));
         };
-        setDomesticTop5(formatRanking(data.domestic));
-        setForeignTop5(formatRanking(data.foreign));
+        const newDomestic = formatRanking(data.domestic);
+        const newForeign = formatRanking(data.foreign);
+        
+        // 이전 순위 저장 (현재 순위가 있을 때만)
+        setDomesticTop5((prev) => {
+          if (prev.length > 0) {
+            setPrevDomesticTop5(prev);
+          }
+          return newDomestic;
+        });
+        setForeignTop5((prev) => {
+          if (prev.length > 0) {
+            setPrevForeignTop5(prev);
+          }
+          return newForeign;
+        });
       } catch (err) { console.error(err); }
     }
     fetchRankings();
@@ -358,6 +374,42 @@ function HomePageContent() {
     }
   };
 
+  // CSS 애니메이션을 동적으로 추가
+  useEffect(() => {
+    const styleId = 'rank-animation-styles';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        @keyframes slideUp {
+          0% {
+            transform: translateY(20px);
+            opacity: 0;
+          }
+          100% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        @keyframes slideDown {
+          0% {
+            transform: translateY(-20px);
+            opacity: 0;
+          }
+          100% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    return () => {
+      const style = document.getElementById(styleId);
+      if (style) style.remove();
+    };
+  }, []);
+
   return (
     <main style={{ backgroundColor: "#ffffff", minHeight: "100vh" }}>
       <div className="page-wrapper">
@@ -390,15 +442,83 @@ function HomePageContent() {
         </section>
 
         <section style={{ margin: "30px auto 0", padding: "0 40px" }}>
-          <h3 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "18px" }}>ALPHACAR 판매 순위 TOP 10</h3>
+          <h3 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "18px" }}>ALPHACAR 월간 차량 판매 순위 TOP5</h3>
           <div style={{ backgroundColor: "#ffffff", borderRadius: "20px", padding: "24px 28px 28px", boxShadow: "0 6px 20px rgba(0,0,0,0.06)", display: "flex", gap: "32px", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: "320px" }}>
               <h4 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "10px" }}>국내 자동차 판매 순위 TOP 5</h4>
-              {domesticTop5.map((car) => <div key={car.rank} style={{ display: "flex", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f5f5f5", fontSize: "13px" }}><span style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#0070f3", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "10px", fontWeight: "700" }}>{car.rank}</span><span style={{ flex: 1, fontWeight: 500 }}>{car.name}</span><span style={{ width: "60px", textAlign: "right" }}>{car.share}</span></div>)}
+              {domesticTop5.map((car, index) => {
+                const prevCar = prevDomesticTop5.find((p) => p.name === car.name);
+                const prevRank = prevCar ? prevCar.rank : null;
+                const rankChange = prevRank && prevRank !== car.rank ? (prevRank > car.rank ? "up" : "down") : null;
+                const rankDiff = prevRank && prevRank !== car.rank ? Math.abs(prevRank - car.rank) : 0;
+                
+                return (
+                  <div 
+                    key={car.rank} 
+                    style={{ 
+                      display: "flex", 
+                      alignItems: "center", 
+                      padding: "8px 0", 
+                      borderBottom: "1px solid #f5f5f5", 
+                      fontSize: "13px",
+                      position: "relative",
+                      animation: rankChange ? `${rankChange === "up" ? "slideUp" : "slideDown"} 0.6s ease-out` : "none"
+                    }}
+                  >
+                    <span style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#0070f3", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "10px", fontWeight: "700" }}>{car.rank}</span>
+                    <span style={{ flex: 1, fontWeight: 500 }}>{car.name}</span>
+                    {rankChange && (
+                      <span style={{ 
+                        marginRight: "8px", 
+                        fontSize: "11px", 
+                        color: rankChange === "up" ? "#10b981" : "#ef4444",
+                        fontWeight: 600
+                      }}>
+                        {rankChange === "up" ? "↑" : "↓"} {rankDiff}
+                      </span>
+                    )}
+                    <span style={{ width: "60px", textAlign: "right" }}>{car.share}</span>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ flex: 1, minWidth: "320px" }}>
               <h4 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "10px" }}>외제 자동차 판매 순위 TOP 5</h4>
-              {foreignTop5.map((car) => <div key={car.rank} style={{ display: "flex", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f5f5f5", fontSize: "13px" }}><span style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#ff4d4f", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "10px", fontWeight: "700" }}>{car.rank}</span><span style={{ flex: 1, fontWeight: 500 }}>{car.name}</span><span style={{ width: "60px", textAlign: "right" }}>{car.share}</span></div>)}
+              {foreignTop5.map((car, index) => {
+                const prevCar = prevForeignTop5.find((p) => p.name === car.name);
+                const prevRank = prevCar ? prevCar.rank : null;
+                const rankChange = prevRank && prevRank !== car.rank ? (prevRank > car.rank ? "up" : "down") : null;
+                const rankDiff = prevRank && prevRank !== car.rank ? Math.abs(prevRank - car.rank) : 0;
+                
+                return (
+                  <div 
+                    key={car.rank} 
+                    style={{ 
+                      display: "flex", 
+                      alignItems: "center", 
+                      padding: "8px 0", 
+                      borderBottom: "1px solid #f5f5f5", 
+                      fontSize: "13px",
+                      position: "relative",
+                      animation: rankChange ? `${rankChange === "up" ? "slideUp" : "slideDown"} 0.6s ease-out` : "none"
+                    }}
+                  >
+                    <span style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#ff4d4f", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "10px", fontWeight: "700" }}>{car.rank}</span>
+                    <span style={{ flex: 1, fontWeight: 500 }}>{car.name}</span>
+                    {rankChange && (
+                      <span style={{ 
+                        marginRight: "8px", 
+                        fontSize: "11px", 
+                        color: rankChange === "up" ? "#10b981" : "#ef4444",
+                        fontWeight: 600
+                      }}>
+                        {rankChange === "up" ? "↑" : "↓"} {rankDiff}
+                      </span>
+                    )}
+                    <span style={{ width: "60px", textAlign: "right" }}>{car.share}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </section>

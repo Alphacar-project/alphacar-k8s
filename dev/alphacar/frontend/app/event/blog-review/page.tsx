@@ -50,24 +50,6 @@ export default function BlogReviewEventPage() {
               textAlign: "center",
             }}
           >
-            {/* 공유 버튼 */}
-            <button
-              type="button"
-              style={{
-                position: "absolute",
-                right: 0,
-                top: "0",
-                borderRadius: "999px",
-                border: "1px solid #ddd",
-                padding: "6px 12px",
-                fontSize: "12px",
-                backgroundColor: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              ↗ 공유
-            </button>
-
             <div
               style={{
                 display: "inline-flex",
@@ -94,7 +76,7 @@ export default function BlogReviewEventPage() {
             </h1>
 
             <div style={{ fontSize: "13px", color: "#666" }}>
-              이벤트 기간 2025-02-05 09:00:00 ~ 2025-12-31 23:59:59
+              이벤트 기간 2025-02-05 09:00:00 ~ 2026-3-31 23:59:59
               &nbsp;&nbsp;|&nbsp;&nbsp; 등록일 2025-01-20
             </div>
           </div>
@@ -144,7 +126,7 @@ export default function BlogReviewEventPage() {
               <div>
                 <div style={{ opacity: 0.9 }}>이벤트 참여 기간</div>
                 <div style={{ marginTop: "4px", fontWeight: "500" }}>
-                  2025. 02. 05 ~ 2025. 12. 31
+                  2025. 02. 05 ~ 2026. 03. 31
                 </div>
               </div>
 

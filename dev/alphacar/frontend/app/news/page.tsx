@@ -19,7 +19,7 @@ const trendArticles = [
     title: "운전자보다 똑똑한 자동차 비서, BMW AI 기반 '프로액티브 케어' 국내 도입",
     bgColor: "#1a1a2e",
     icon: "🤖",
-    image: "/news/bmw-ai-robot.png", // 두 번째 이미지: 로봇
+    image: "/news/robot.png", // 두 번째 이미지: 로봇
   },
   {
     id: 3,
