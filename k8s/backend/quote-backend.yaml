@@ -98,6 +98,9 @@ spec:
         - name: ESTIMATE_MONGO_URI
           value: "mongodb://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?authSource=admin"
 
+        command: ["node"]
+        args: ["/app/quote/dist/src/main.js"]
+
         # ✅ Global Prefix('api') 반영에 따른 프로브 경로 수정
         livenessProbe:
           httpGet:

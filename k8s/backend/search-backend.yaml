@@ -20,7 +20,7 @@ spec:
       - name: search-backend
         # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
         # (빌드 및 푸시하신 버전에 맞춰 태그를 지정하세요)
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-search:1.0.0.16-0748057
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-search:2.0.2
         imagePullPolicy: Always
         ports:
         - containerPort: 3007
@@ -76,14 +76,12 @@ spec:
 
         # ✅ 중요: app.setGlobalPrefix('api') 반영에 따른 헬스체크 경로 수정
         livenessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 3007
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 3007
           initialDelaySeconds: 15
           periodSeconds: 5

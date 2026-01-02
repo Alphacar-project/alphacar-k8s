@@ -65,16 +65,17 @@ spec:
               name: apc-be-secret
               key: MONGO_DB_NAME
 
+        command: ["node"]
+        args: ["/app/news/dist/main.js"]
+
         # ✅ Global Prefix('api') 반영에 따른 헬스체크 경로 수정
         livenessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 3008
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
-          httpGet:
-            path: /api
+          tcpSocket:
             port: 3008
           initialDelaySeconds: 15
           periodSeconds: 5

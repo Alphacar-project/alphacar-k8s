@@ -26,7 +26,7 @@ spec:
                 - a-worker4
       containers:
       - name: aichat-backend
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.0.35
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.0.36
         imagePullPolicy: Always
         ports:
         - containerPort: 4000
