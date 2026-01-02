@@ -35,17 +35,41 @@ export default function FavoritePage() {
         return res.json();
       })
       .then((data) => {
-        console.log("💖 [찜 목록 페이지] API 응답:", data);
-        // 데이터가 배열인지 확인하고, vehicleId가 populate되었는지 확인
+        console.log("💖 [찜 목록 페이지] API 응답 원본:", data);
+        
+        // API 응답을 배열로 변환
+        let favoritesArray = [];
         if (Array.isArray(data)) {
-          setFavorites(data);
+          favoritesArray = data;
         } else if (data && Array.isArray(data.favorites)) {
-          // 응답이 { favorites: [...] } 형태일 수 있음
-          setFavorites(data.favorites);
+          favoritesArray = data.favorites;
         } else {
           console.warn("💖 [찜 목록 페이지] 예상치 못한 데이터 형식:", data);
           setFavorites([]);
+          setLoading(false);
+          return;
         }
+
+        // 최근 본 차량 페이지와 동일한 형태로 변환
+        // fav.vehicleId가 populate된 경우 차량 데이터 추출
+        const transformedCars = favoritesArray.map((fav) => {
+          // vehicleId가 populate된 경우
+          const vehicle = fav.vehicleId || fav.vehicle || fav;
+          
+          // 최근 본 차량 페이지와 동일한 구조로 변환
+          return {
+            _id: fav._id || vehicle._id,
+            name: vehicle.name || vehicle.vehicle_name || "",
+            brand: vehicle.manufacturer || vehicle.brand_name || "",
+            image: vehicle.imageUrl || vehicle.main_image || vehicle.image || null,
+            price: vehicle.price || vehicle.minPrice || (vehicle.trims && vehicle.trims.length > 0 ? vehicle.trims[0].price : null),
+            // 원본 데이터도 보존 (필요시 사용)
+            original: vehicle
+          };
+        }).filter(car => car.name || car._id); // 이름이나 ID가 있는 것만 필터링
+
+        console.log("💖 [찜 목록 페이지] 변환된 차량 데이터:", transformedCars);
+        setFavorites(transformedCars);
         setLoading(false);
       })
       .catch((err) => {
@@ -156,86 +180,50 @@ export default function FavoritePage() {
           </div>
         )}
 
-        {/* 차량 리스트 그리드 */}
+        {/* 차량 리스트 그리드 - 최근 본 차량 페이지와 동일한 구조 */}
         {!loading && favorites.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "24px" }}>
-            {favorites.map((fav, idx) => {
-              // vehicleId가 populate되었는지 확인
-              const car = fav.vehicleId || fav.vehicle || fav;
-              
-              // 디버깅: fav와 car 객체 확인
-              console.log("💖 [찜 목록 페이지] fav 객체:", fav);
-              console.log("💖 [찜 목록 페이지] car 객체:", car);
-              
-              // 차량 데이터가 없거나 필수 필드가 없는 경우
-              if (!car) {
-                console.warn("💖 [찜 목록 페이지] 차량 데이터 없음 (car가 null):", fav);
-                return null;
-              }
-              
-              // 차량 이름이나 ID가 하나라도 있으면 표시
-              const hasName = car.name || car.vehicle_name;
-              const hasId = car._id || car.lineup_id || car.vehicleId || car.id;
-              
-              if (!hasName && !hasId) {
-                console.warn("💖 [찜 목록 페이지] 차량 이름/ID 모두 없음:", fav, car);
-                return null;
-              }
-
-              // 차량 이름 추출
-              const carName = car.name || car.vehicle_name || "";
-              const brandName = car.manufacturer || car.brand_name || "";
-              
-              // 가격 추출 (우선순위: price > minPrice > trims[0].price)
-              const price = car.price || car.minPrice || (car.trims && car.trims.length > 0 ? car.trims[0].price : null);
-              
-              // 이미지 URL 추출
-              const imageUrl = car.imageUrl || car.main_image || car.image || null;
-
-              return (
-                <div 
-                  key={fav._id || `fav-${idx}`}
-                  onClick={() => handleCarClick(fav)}
-                  style={{ 
-                    backgroundColor: "#fff", borderRadius: "16px", padding: "20px", cursor: "pointer",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.05)", transition: "transform 0.2s, box-shadow 0.2s",
-                    border: "1px solid #f1f5f9"
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = "translateY(-4px)";
-                    e.currentTarget.style.boxShadow = "0 10px 20px rgba(0,0,0,0.08)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "translateY(0)";
-                    e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.05)";
-                  }}
-                >
-                  {/* 이미지 영역 */}
-                  <div style={{ width: "100%", height: "150px", marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", borderRadius: "12px", overflow: "hidden" }}>
-                    {imageUrl ? (
-                      <img src={imageUrl} alt={carName} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
-                    ) : (
-                      <span style={{ color: "#ccc", fontSize: "13px" }}>이미지 없음</span>
-                    )}
-                  </div>
-
-                  {/* 텍스트 정보 */}
-                  <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "4px", fontWeight: "600" }}>
-                    {brandName ? `[${brandName}]` : "[미분류]"}
-                  </div>
-                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#1e293b", marginBottom: "16px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {carName || "차량명 없음"}
-                  </div>
-                  
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
-                    <span style={{ fontSize: "13px", color: "#94a3b8" }}>시작가</span>
-                    <span style={{ fontSize: "17px", fontWeight: "700", color: "#2563eb" }}>
-                      {price ? (Number(price) / 10000).toLocaleString() + "만원" : "가격 문의"}
-                    </span>
-                  </div>
+            {favorites.map((car, idx) => (
+              <div 
+                key={`${car._id}-${idx}`} 
+                onClick={() => handleCarClick({ vehicleId: car.original || car, vehicle: car.original || car })}
+                style={{ 
+                  backgroundColor: "#fff", borderRadius: "16px", padding: "20px", cursor: "pointer",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.05)", transition: "transform 0.2s, box-shadow 0.2s",
+                  border: "1px solid #f1f5f9"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-4px)";
+                  e.currentTarget.style.boxShadow = "0 10px 20px rgba(0,0,0,0.08)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.05)";
+                }}
+              >
+                {/* 이미지 영역 */}
+                <div style={{ width: "100%", height: "150px", marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", borderRadius: "12px", overflow: "hidden" }}>
+                  {car.image ? (
+                    <img src={car.image} alt={car.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                  ) : (
+                    <span style={{ color: "#ccc", fontSize: "13px" }}>이미지 없음</span>
+                  )}
                 </div>
-              );
-            })}
+
+                {/* 텍스트 정보 */}
+                <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "4px", fontWeight: "600" }}>{car.brand}</div>
+                <div style={{ fontSize: "18px", fontWeight: "800", color: "#1e293b", marginBottom: "16px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {car.name}
+                </div>
+                
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                  <span style={{ fontSize: "13px", color: "#94a3b8" }}>시작가</span>
+                  <span style={{ fontSize: "17px", fontWeight: "700", color: "#2563eb" }}>
+                    {car.price ? Number(car.price).toLocaleString() + "원" : "가격 문의"}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

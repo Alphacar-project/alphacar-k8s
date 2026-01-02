@@ -367,9 +367,26 @@ function HomePageContent() {
     // vehicleId를 문자열로 변환
     const vehicleIdStr = String(vehicleId);
 
-    // ✅ 낙관적 업데이트 제거 - 서버 응답 후에만 상태 업데이트
-    // 이전 상태 저장 (에러 시 복구용)
-    const prevLikedIds = new Set(likedVehicleIds);
+    // ✅ 낙관적 업데이트: 즉시 UI 업데이트 (하트가 빨간색으로 바뀜)
+    const nextLikedIds = new Set(likedVehicleIds);
+    const wasLiked = nextLikedIds.has(vehicleIdStr) || 
+                     (car.lineup_id && nextLikedIds.has(String(car.lineup_id))) ||
+                     (car._id && nextLikedIds.has(String(car._id))) ||
+                     (car.vehicleId && nextLikedIds.has(String(car.vehicleId)));
+    
+    // 모든 가능한 ID 형식 추가/제거
+    if (wasLiked) {
+      nextLikedIds.delete(vehicleIdStr);
+      if (car.lineup_id) nextLikedIds.delete(String(car.lineup_id));
+      if (car._id) nextLikedIds.delete(String(car._id));
+      if (car.vehicleId) nextLikedIds.delete(String(car.vehicleId));
+    } else {
+      nextLikedIds.add(vehicleIdStr);
+      if (car.lineup_id) nextLikedIds.add(String(car.lineup_id));
+      if (car._id) nextLikedIds.add(String(car._id));
+      if (car.vehicleId) nextLikedIds.add(String(car.vehicleId));
+    }
+    setLikedVehicleIds(nextLikedIds); // 즉시 UI 업데이트
 
     try {
       console.log("💖 [하트 클릭] 요청 데이터:", { userId, vehicleId: vehicleIdStr });
@@ -386,13 +403,11 @@ function HomePageContent() {
       }
       const result = await res.json();
       console.log("💖 [하트 클릭] 성공:", result);
-      // ✅ 성공 후 서버 상태와 동기화 (이것이 실제 상태를 업데이트함)
+      // ✅ 성공 후 서버 상태와 동기화 (ID 형식 차이 보정)
       await fetchMyFavorites(userId);
     } catch (err) {
       console.error("💖 [하트 클릭] 찜 토글 실패:", err);
-      // 에러 발생 시 이전 상태로 복구
-      setLikedVehicleIds(prevLikedIds);
-      // 서버 상태로 재동기화 시도
+      // 에러 발생 시 서버 상태로 재동기화 (낙관적 업데이트 롤백)
       await fetchMyFavorites(userId);
     }
   };
