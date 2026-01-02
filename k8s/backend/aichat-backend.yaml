@@ -15,8 +15,6 @@ spec:
         app: aichat-backend
     spec:
       serviceAccountName: aichat-backend-sa
-      # ✅ EKS 노드 IAM Role 권한을 사용하므로 Harbor 시크릿 제거
-      # ✅ 기존 노드 어피니티는 유지하되, EKS 노드 이름에 맞춰 확인이 필요할 수 있습니다.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -28,7 +26,6 @@ spec:
                 - a-worker4
       containers:
       - name: aichat-backend
-        # ✅ Harbor 대신 AWS ECR 이미지 주소로 교체
         image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/alphacar-aichat:1.0.0.32
         imagePullPolicy: Always
         ports:
@@ -39,7 +36,6 @@ spec:
           value: "4000"
         - name: SERVICE_NAME
           value: "aichat-backend"
-        # ConfigMap (apc-be-config) 참조 유지
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -80,7 +76,6 @@ spec:
             configMapKeyRef:
               name: apc-be-config
               key: BEDROCK_LLM_MODEL_ID
-        # AI 전용 Secret (apc-aichat-secret) 참조 유지
         - name: DATABASE_USER
           valueFrom:
             secretKeyRef:
@@ -106,19 +101,20 @@ spec:
             secretKeyRef:
               name: apc-aichat-secret
               key: AWS_SECRET_ACCESS_KEY
-        
+
         volumeMounts:
         - name: vector-store
           mountPath: /app/vector_store
 
-        # ✅ 기존 임베딩 및 실행 스크립트 유지
+        # 🛠️ [수정 완료] 경로 최적화 및 실행 스크립트 수정
         command: ["/bin/sh", "-c"]
         args:
         - |
           mkdir -p /app/vector_store
+          # 벡터 스토어 체크 (데이터가 없거나 파일이 너무 작으면 임베딩 수행)
           if [ ! -f /app/vector_store/docstore.json ] || [ ! -s /app/vector_store/docstore.json ] || [ $(wc -c < /app/vector_store/docstore.json) -lt 500 ]; then
             echo '🔄 벡터 스토어가 없거나 비어있습니다. 임베딩을 시작합니다...'
-            cd /app/aichat
+            cd /app
             if [ -f dist/scripts/ingest-data.js ]; then
               node dist/scripts/ingest-data.js
             else
@@ -128,20 +124,20 @@ spec:
           else
             echo '✅ 벡터 스토어가 이미 존재합니다.'
           fi
-          node /app/aichat/dist/src/main.js
+          # 아까 확인한 실제 경로 (/app/dist/src/main.js) 사용
+          node /app/dist/src/main.js
 
-        # ✅ app.setGlobalPrefix('api') 반영에 따른 헬스체크 경로 수정
         livenessProbe:
           httpGet:
             path: /api
             port: 4000
-          initialDelaySeconds: 60 # 임베딩 시간을 고려하여 대기 시간 충분히 확보
+          initialDelaySeconds: 80 # 임베딩 시간을 고려하여 여유 있게 설정
           periodSeconds: 15
         readinessProbe:
           httpGet:
             path: /api
             port: 4000
-          initialDelaySeconds: 30
+          initialDelaySeconds: 40
           periodSeconds: 10
 
         resources:
@@ -153,7 +149,7 @@ spec:
             cpu: "1000m"
       volumes:
       - name: vector-store
-        emptyDir: {} # AWS EFS 연동 전까지 임시 사용 유지
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -168,5 +164,4 @@ spec:
     targetPort: 4000
     protocol: TCP
     name: http
-  # ALB 인그레스 뒷단에 위치하므로 ClusterIP 유지
   type: ClusterIP
