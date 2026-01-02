@@ -106,8 +106,9 @@ export default function FavoritePage() {
     const brandMatch = carName.match(/\[([^\]]+)\]/);
     const brandName = brandMatch ? brandMatch[1] : (car.manufacturer || car.brand_name || "");
 
-    // 차량 ID 추출 (메인 페이지와 동일한 로직: lineup_id 우선, 없으면 vehicleId, _id, id 순서)
-    const trimId = car.lineup_id || car.vehicleId || car._id || car.id || carName;
+    // 차량 ID 추출 (CarDetailModal과 동일한 로직: vehicleId 우선, 없으면 _id, id 순서)
+    // lineup_id는 백엔드 API에서 조회되지 않을 수 있으므로 우선순위에서 제외
+    const trimId = car.vehicleId || car._id || car.id || car.lineup_id || carName;
 
     // 기본트림명 추출
     const baseTrimName = car.base_trim_name || car.baseTrimName || "";
