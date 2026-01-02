@@ -28,53 +28,14 @@ export default function FavoritePage() {
 
     // 2. 찜 목록 API 호출
     fetch(`/api/favorites/list?userId=${storedUserId}`) // VirtualService /api/favorites 규칙 사용
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`API 응답 실패: ${res.status}`);
-        }
-        return res.json();
-      })
+      .then((res) => res.json())
       .then((data) => {
-        console.log("💖 [찜 목록 페이지] API 응답 원본:", data);
-        
-        // API 응답을 배열로 변환
-        let favoritesArray = [];
-        if (Array.isArray(data)) {
-          favoritesArray = data;
-        } else if (data && Array.isArray(data.favorites)) {
-          favoritesArray = data.favorites;
-        } else {
-          console.warn("💖 [찜 목록 페이지] 예상치 못한 데이터 형식:", data);
-          setFavorites([]);
-          setLoading(false);
-          return;
-        }
-
-        // 최근 본 차량 페이지와 동일한 형태로 변환
-        // fav.vehicleId가 populate된 경우 차량 데이터 추출
-        const transformedCars = favoritesArray.map((fav) => {
-          // vehicleId가 populate된 경우
-          const vehicle = fav.vehicleId || fav.vehicle || fav;
-          
-          // 최근 본 차량 페이지와 동일한 구조로 변환
-          return {
-            _id: fav._id || vehicle._id,
-            name: vehicle.name || vehicle.vehicle_name || "",
-            brand: vehicle.manufacturer || vehicle.brand_name || "",
-            image: vehicle.imageUrl || vehicle.main_image || vehicle.image || null,
-            price: vehicle.price || vehicle.minPrice || (vehicle.trims && vehicle.trims.length > 0 ? vehicle.trims[0].price : null),
-            // 원본 데이터도 보존 (필요시 사용)
-            original: vehicle
-          };
-        }).filter(car => car.name || car._id); // 이름이나 ID가 있는 것만 필터링
-
-        console.log("💖 [찜 목록 페이지] 변환된 차량 데이터:", transformedCars);
-        setFavorites(transformedCars);
+        console.log("💖 [찜 목록 페이지] API 응답:", data);
+        setFavorites(data);
         setLoading(false);
       })
       .catch((err) => {
         console.error("💖 [찜 목록 페이지] 찜 목록 로딩 실패:", err);
-        setFavorites([]);
         setLoading(false);
       });
   }, [router]);
@@ -91,18 +52,20 @@ export default function FavoritePage() {
     return (num / 10000).toLocaleString() + "만원 ~";
   };
 
-  // 차량 클릭 시 개별 견적 페이지로 이동
+  // 차량 클릭 핸들러 - 개별 견적 페이지로 이동
   const handleCarClick = (favItem) => {
     // vehicleId가 populate되었는지 확인
     const car = favItem.vehicleId || favItem.vehicle || favItem;
     if (!car) {
       console.warn("💖 [찜 목록 페이지] 차량 데이터 없음:", favItem);
+      alert("차량 정보를 불러올 수 없습니다.");
       return;
     }
 
     // 차량 이름 추출
     const carName = car.name || car.vehicle_name;
     if (!carName) {
+      console.warn("💖 [찜 목록 페이지] 차량 이름 없음:", car);
       alert("차량 정보를 불러올 수 없습니다.");
       return;
     }
@@ -119,8 +82,10 @@ export default function FavoritePage() {
     const brandMatch = carName.match(/\[([^\]]+)\]/);
     const brandName = brandMatch ? brandMatch[1] : (car.manufacturer || car.brand_name || "");
 
-    // 차량 ID 추출 (lineup_id 우선)
-    const trimId = car.lineup_id || car.vehicleId || car._id || carName;
+    // 차량 ID 추출 (lineup_id 우선, 없으면 vehicleId, _id, id 순서)
+    const trimId = car.lineup_id || car.vehicleId || car._id || car.id || carName;
+
+    console.log("💖 [찜 목록 페이지] 차량 클릭:", { carName, modelName, brandName, trimId, car });
 
     // 개별 견적 페이지로 이동
     const queryParams = new URLSearchParams();
@@ -136,102 +101,187 @@ export default function FavoritePage() {
     router.push(`/quote/personal?${queryParams.toString()}`);
   };
 
-  // 모달 닫기 핸들러 (필요시 사용)
+  // 모달 닫기 핸들러
   const handleCloseModal = () => {
     setSelectedCar(null);
     window.location.reload(); 
   };
 
+  const hasFavorites = favorites.length > 0;
+
   return (
-    <main style={{ backgroundColor: "#f8f9fa", minHeight: "100vh" }}>
-      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "40px 20px" }}>
-        
-        {/* 헤더 영역 */}
-        <div style={{ marginBottom: "30px" }}>
-          <h1 style={{ fontSize: "24px", fontWeight: "800", color: "#1e293b", margin: 0 }}>
-            내가 찜한 차량 <span style={{ color: "#2563eb", fontSize: "18px", marginLeft: "4px" }}>{favorites.length}</span>
+    <main
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#f5f7fb",
+        padding: "40px 0 80px",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "0 20px",
+        }}
+      >
+        {/* 상단 타이틀 영역 */}
+        <div style={{ marginBottom: 32 }}>
+          <h1 style={{ fontSize: "26px", fontWeight: 700, marginBottom: 8 }}>
+            내가 찜한 차량
           </h1>
-          <p style={{ fontSize: "14px", color: "#666", marginTop: "8px" }}>
+          <p style={{ fontSize: "14px", color: "#666" }}>
             관심 있는 차량을 한 곳에서 모아볼 수 있어요.
           </p>
         </div>
 
-        {/* 로딩 상태 */}
+        {/* 로딩 중일 때 */}
         {loading && (
-          <div style={{ padding: "60px", textAlign: "center", color: "#999", fontSize: "16px" }}>
-            데이터를 불러오는 중입니다...
-          </div>
+           <div style={{ textAlign: "center", padding: "100px 0", color: "#888" }}>
+             데이터를 불러오는 중입니다...
+           </div>
         )}
 
-        {/* 데이터 없음 상태 */}
-        {!loading && favorites.length === 0 && (
-          <div style={{ padding: "100px 0", textAlign: "center" }}>
-            <div style={{ fontSize: "40px", marginBottom: "16px" }}>❤️</div>
-            <p style={{ color: "#666", fontSize: "16px", marginBottom: "24px" }}>아직 찜한 차량이 없어요.</p>
-            <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>
+        {/* 로딩 끝난 후 내용 영역 */}
+        {!loading && !hasFavorites ? (
+          // 👉 찜한 차량이 없을 때
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              padding: "60px 20px",
+              textAlign: "center",
+              boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+            }}
+          >
+            <div
+              style={{
+                width: 64, height: 64, borderRadius: "50%", margin: "0 auto 16px",
+                border: "1px solid #e5e7eb", display: "flex", alignItems: "center",
+                justifyContent: "center", fontSize: "28px",
+              }}
+            >
+              ❤️
+            </div>
+            <p style={{ fontSize: "18px", fontWeight: 600, marginBottom: 8 }}>
+              아직 찜한 차량이 없어요.
+            </p>
+            <p style={{ fontSize: "14px", color: "#777", marginBottom: 24 }}>
               마음에 드는 차량 우측 하단의 하트 버튼을 눌러 찜 목록에 추가해 보세요.
             </p>
             <button 
-              onClick={() => router.push('/')}
-              style={{ padding: "12px 30px", borderRadius: "99px", background: "#2563eb", color: "#fff", border: "none", cursor: "pointer", fontWeight: "bold", fontSize: "15px" }}
+                onClick={() => router.push("/")}
+                style={{ 
+                  padding: "12px 24px", backgroundColor: "#0066ff", color: "#fff", 
+                  border: "none", borderRadius: "999px", cursor: "pointer", 
+                  fontWeight: 600, fontSize: "14px"
+                }}
             >
               차량 구경하러 가기
             </button>
           </div>
-        )}
+        ) : !loading && hasFavorites ? (
+          // 👉 찜한 차량이 있을 때
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              padding: "24px 24px 32px",
+              boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <span style={{ fontSize: "14px", color: "#555" }}>
+                총 {favorites.length}대
+              </span>
+            </div>
 
-        {/* 차량 리스트 그리드 - 최근 본 차량 페이지와 동일한 구조 */}
-        {!loading && favorites.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "24px" }}>
-            {favorites.map((car, idx) => (
-              <div 
-                key={`${car._id}-${idx}`} 
-                onClick={() => handleCarClick({ vehicleId: car.original || car, vehicle: car.original || car })}
-                style={{ 
-                  backgroundColor: "#fff", borderRadius: "16px", padding: "20px", cursor: "pointer",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.05)", transition: "transform 0.2s, box-shadow 0.2s",
-                  border: "1px solid #f1f5f9"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-4px)";
-                  e.currentTarget.style.boxShadow = "0 10px 20px rgba(0,0,0,0.08)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.05)";
-                }}
-              >
-                {/* 이미지 영역 */}
-                <div style={{ width: "100%", height: "150px", marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", borderRadius: "12px", overflow: "hidden" }}>
-                  {car.image ? (
-                    <img src={car.image} alt={car.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
-                  ) : (
-                    <span style={{ color: "#ccc", fontSize: "13px" }}>이미지 없음</span>
-                  )}
-                </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                gap: "20px",
+              }}
+            >
+              {favorites.map((fav) => {
+                const car = fav.vehicleId; 
+                if (!car) return null;
 
-                {/* 텍스트 정보 */}
-                <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "4px", fontWeight: "600" }}>{car.brand}</div>
-                <div style={{ fontSize: "18px", fontWeight: "800", color: "#1e293b", marginBottom: "16px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {car.name}
-                </div>
-                
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
-                  <span style={{ fontSize: "13px", color: "#94a3b8" }}>시작가</span>
-                  <span style={{ fontSize: "17px", fontWeight: "700", color: "#2563eb" }}>
-                    {car.price ? Number(car.price).toLocaleString() + "원" : "가격 문의"}
-                  </span>
-                </div>
-              </div>
-            ))}
+                // 🔹 [수정됨] 가격 데이터 우선순위 로직 추가
+                // 1. car.price (최상위 가격)
+                // 2. car.minPrice (최소 가격 필드)
+                // 3. car.trims 배열의 첫 번째 가격 (트림이 있다면)
+                const displayPrice = car.price || car.minPrice || (car.trims && car.trims.length > 0 ? car.trims[0].price : 0);
+
+                return (
+                  <div
+                    key={fav._id}
+                    style={{
+                      borderRadius: "16px", border: "1px solid #e5e7eb", padding: "16px 16px 18px",
+                      backgroundColor: "#ffffff", display: "flex", flexDirection: "column",
+                      justifyContent: "space-between", cursor: "pointer",
+                      transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                    }}
+                    onClick={() => handleCarClick(fav)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-4px)";
+                      e.currentTarget.style.boxShadow = "0 10px 25px rgba(0,0,0,0.1)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          width: "100%", height: "150px", borderRadius: "12px", overflow: "hidden",
+                          marginBottom: 12, backgroundColor: "#f3f4f6", display: "flex",
+                          alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        {car.imageUrl || car.main_image ? (
+                          <img
+                            src={car.imageUrl || car.main_image}
+                            alt={car.name || car.vehicle_name}
+                            style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "#aaa" }}>이미지 없음</span>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: "12px", color: "#888", marginBottom: 4 }}>
+                        [{car.manufacturer || car.brand_name || "미분류"}]
+                      </div>
+                      <div style={{ fontSize: "15px", fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>
+                        {car.name || car.vehicle_name}
+                      </div>
+                      <div style={{ fontSize: "14px", fontWeight: 600, color: "#0066ff" }}>
+                        {/* 🔹 여기서 찾아낸 가격을 포맷팅 */}
+                        {formatPrice(displayPrice)}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      style={{
+                        marginTop: 12, width: "100%", padding: "10px 0", borderRadius: "999px",
+                        border: "none", backgroundColor: "#0066ff", color: "#ffffff",
+                        fontSize: "14px", fontWeight: 600, cursor: "pointer",
+                      }}
+                    >
+                      상세보기
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        )}
+        ) : null}
 
-        {/* 모달 (필요시 사용) */}
         {selectedCar && (
           <CarDetailModal car={selectedCar} onClose={handleCloseModal} />
         )}
-
       </div>
     </main>
   );

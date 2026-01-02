@@ -139,19 +139,24 @@ function HomePageContent() {
       if (res.ok) {
         const data = await res.json();
         console.log("💖 [fetchMyFavorites] 찜 목록 응답:", data);
-        // vehicleId가 populate된 경우 lineup_id를 우선 사용, 없으면 _id 사용
+        // vehicleId가 populate된 경우 모든 가능한 ID 형식 추가
         const ids = new Set<string>();
         data.forEach((item: any) => {
           if (!item.vehicleId) return;
-          // lineup_id가 있으면 lineup_id 사용 (문자열), 없으면 _id 사용 (ObjectId 문자열)
-          const lineupId = item.vehicleId.lineup_id ? String(item.vehicleId.lineup_id) : null;
-          const objectId = item.vehicleId._id ? String(item.vehicleId._id) : null;
+          const vehicle = item.vehicleId;
           
-          // 둘 다 추가하여 ID 형식이 달라도 매칭되도록
-          if (lineupId) ids.add(lineupId);
-          if (objectId) ids.add(objectId);
+          // 모든 가능한 ID 형식 추가 (lineup_id, _id, vehicleId, id)
+          if (vehicle.lineup_id) ids.add(String(vehicle.lineup_id));
+          if (vehicle._id) ids.add(String(vehicle._id));
+          if (vehicle.vehicleId) ids.add(String(vehicle.vehicleId));
+          if (vehicle.id) ids.add(String(vehicle.id));
           
-          console.log("💖 [fetchMyFavorites] 추출된 ID:", { lineupId, objectId }, "from vehicleId:", item.vehicleId);
+          console.log("💖 [fetchMyFavorites] 추출된 ID:", { 
+            lineup_id: vehicle.lineup_id, 
+            _id: vehicle._id, 
+            vehicleId: vehicle.vehicleId,
+            id: vehicle.id
+          }, "from vehicleId:", vehicle);
         });
         console.log("💖 [fetchMyFavorites] 최종 찜 ID 목록:", Array.from(ids));
         setLikedVehicleIds(ids);
