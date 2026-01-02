@@ -148,6 +148,7 @@ export default function NewsPage() {
         maxWidth: "1200px",
         margin: "40px auto 80px",
         padding: "0 20px",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
       {/* 상단 위치 표시 / 소제목 */}

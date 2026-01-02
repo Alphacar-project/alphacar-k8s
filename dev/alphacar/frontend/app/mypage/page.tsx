@@ -295,6 +295,7 @@ function MyPageContent() {
           display: "flex",
           gap: "40px",
           alignItems: "flex-start",
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
         }}
       >
         {/* 왼쪽 배너 */}

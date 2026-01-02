@@ -90,7 +90,12 @@ export default function CustomerCenterPage() {
   };
 
   return (
-    <div style={{ maxWidth: "1100px", margin: "40px auto 96px", padding: "0 20px" }}>
+    <div style={{ 
+      maxWidth: "1100px", 
+      margin: "40px auto 96px", 
+      padding: "0 20px",
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    }}>
       {/* 헤더 영역 */}
       <div style={{ textAlign: "center", marginBottom: "36px" }}>
         <h1 style={{ fontSize: "30px", fontWeight: 800, letterSpacing: "-0.4px", margin: 0 }}>고객센터</h1>

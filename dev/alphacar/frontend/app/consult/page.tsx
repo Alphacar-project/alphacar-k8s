@@ -16,7 +16,12 @@ export default function ConsultPage() {
   };
 
   return (
-    <div style={{ maxWidth: "960px", margin: "36px auto 80px", padding: "0 16px" }}>
+    <div style={{ 
+      maxWidth: "960px", 
+      margin: "36px auto 80px", 
+      padding: "0 16px",
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    }}>
       {/* 헤더 */}
       <div style={{ textAlign: "center", marginBottom: "28px" }}>
         <h1 style={{ fontSize: "30px", fontWeight: 800, margin: "0 0 10px" }}>1:1 상담신청</h1>

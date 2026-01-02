@@ -106,6 +106,7 @@ export default function CommunityPage() {
         maxWidth: "1200px",
         margin: "0 auto",
         padding: "40px 16px 80px",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
       <main>

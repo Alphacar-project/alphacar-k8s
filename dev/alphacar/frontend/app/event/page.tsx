@@ -332,6 +332,7 @@ export default function EventPage() {
       style={{
         minHeight: "100vh",
         backgroundColor: "#f5f7fb",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
       <div
