@@ -137,7 +137,10 @@ pipeline {
                         def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                         echo "🐳 도커 빌드 시작: ${imageFullTag}"
                         
-                        sh "docker build -f Dockerfile -t ${imageFullTag} ."
+                        // Docker 빌드 타임아웃 설정 (30분)
+                        timeout(time: 30, unit: 'MINUTES') {
+                            sh "docker build -f Dockerfile -t ${imageFullTag} ."
+                        }
 
                         // AWS ECR 로그인
                         script {
