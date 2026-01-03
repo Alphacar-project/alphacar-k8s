@@ -9,7 +9,7 @@ RUN npm install -g npm@latest
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # 2. 빌드
 FROM base AS builder
