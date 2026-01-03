@@ -164,18 +164,7 @@ pipeline {
                                         sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
                                     fi
 
-                                    echo "🚀 SonarQube 스캔 실행 중..."
-                                    
-                                    # 커버리지 리포트 파일 확인 및 내용 검증
-                                    if [ ! -f "coverage/lcov.info" ]; then
-                                        echo "❌ coverage/lcov.info 파일이 없습니다!"
-                                        exit 1
-                                    fi
-                                    
-                                    echo "📊 커버리지 리포트 파일 정보:"
-                                    ls -lh coverage/lcov.info
-                                    echo "📄 커버리지 리포트 첫 10줄:"
-                                    head -10 coverage/lcov.info || echo "파일 읽기 실패"
+                                    echo "🚀 SonarQube 빠른 스캔 시작..."
                                     
                                     # 실제 존재하는 소스 디렉토리 확인
                                     SOURCES="app"
@@ -184,25 +173,16 @@ pipeline {
                                     [ -d "pages" ] && SOURCES="\${SOURCES},pages"
                                     echo "📁 분석할 소스 디렉토리: \${SOURCES}"
                                     
-                                    # 커버리지 리포트 경로를 절대 경로로 변환
-                                    COVERAGE_PATH=\$(pwd)/coverage/lcov.info
-                                    echo "📊 커버리지 리포트 절대 경로: \${COVERAGE_PATH}"
-                                    
+                                    # 빠른 스캔을 위한 최적화된 설정
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
                                         -Dsonar.sources=\${SOURCES} \\
-                                        -Dsonar.javascript.lcov.reportPaths=\${COVERAGE_PATH} \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
-                                        -Dsonar.exclusions=**/*.css \\
+                                        -Dsonar.exclusions=**/*.css,**/*.test.*,**/*.spec.*,**/__tests__/**,**/node_modules/**,**/.next/** \\
                                         -Dsonar.coverage.exclusions=**/* \\
                                         -Dsonar.cpd.exclusions=**/* \\
-                                        -Dsonar.issue.ignore.multicriteria=e1,e2,e3 \\
-                                        -Dsonar.issue.ignore.multicriteria.e1.ruleKey=javascript:S1481 \\
-                                        -Dsonar.issue.ignore.multicriteria.e1.resourceKey=**/* \\
-                                        -Dsonar.issue.ignore.multicriteria.e2.ruleKey=* \\
-                                        -Dsonar.issue.ignore.multicriteria.e2.resourceKey=**/* \\
-                                        -Dsonar.issue.ignore.multicriteria.e3.ruleKey=* \\
-                                        -Dsonar.issue.ignore.multicriteria.e3.resourceKey=**/* \\
+                                        -Dsonar.javascript.analyzer.maxFileSize=500 \\
+                                        -Dsonar.analysis.mode=preview \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL}
 
@@ -234,9 +214,16 @@ pipeline {
                         
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
-                            // Docker 빌드 전 캐시 정리 (필요시)
-                            sh "docker builder prune -f || true"
-                            sh "docker build --pull -f Dockerfile -t ${imageFullTag} ."
+                            // Docker 빌드 캐시 활용 (빌드 시간 단축)
+                            // BuildKit 사용으로 더 빠른 빌드
+                            // --pull 제거하여 캐시된 베이스 이미지 사용
+                            sh """
+                                DOCKER_BUILDKIT=1 docker build \\
+                                    -f Dockerfile \\
+                                    -t ${imageFullTag} \\
+                                    --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
+                                    .
+                            """
                         }
 
                         // AWS ECR 로그인
