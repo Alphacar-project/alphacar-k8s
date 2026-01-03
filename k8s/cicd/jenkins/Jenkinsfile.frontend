@@ -107,35 +107,74 @@ pipeline {
                 dir('dev/alphacar/frontend') {
                     script {
                         // Node.js/npm 경로 확인 및 설정
-                        def nodePath = sh(script: 'which node || echo ""', returnStdout: true).trim()
-                        def npmPath = sh(script: 'which npm || echo ""', returnStdout: true).trim()
+                        echo "🔍 Node.js/npm 경로 찾는 중..."
+                        def nodePath = sh(script: 'which node 2>/dev/null || echo ""', returnStdout: true).trim()
+                        def npmPath = sh(script: 'which npm 2>/dev/null || echo ""', returnStdout: true).trim()
                         
+                        // 여러 일반적인 경로에서 Node.js 찾기
+                        if (!nodePath) {
+                            echo "⚠️ PATH에서 Node.js를 찾을 수 없습니다. 일반적인 경로에서 검색 중..."
+                            nodePath = sh(script: '''
+                                for path in /usr/local/bin/node /usr/bin/node /opt/nodejs/bin/node ~/.nvm/versions/node/*/bin/node; do
+                                    if [ -f "$path" ] 2>/dev/null; then
+                                        echo "$path"
+                                        break
+                                    fi
+                                done
+                            ''', returnStdout: true).trim()
+                        }
+                        
+                        // nvm이 있는 경우 사용 시도
                         if (!nodePath || !npmPath) {
-                            echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm을 사용하여 설치 시도..."
-                            sh """
-                                export NVM_DIR="\${HOME}/.nvm"
-                                [ -s "\$NVM_DIR/nvm.sh" ] && \\. "\$NVM_DIR/nvm.sh" || {
-                                    echo "❌ nvm이 설치되어 있지 않습니다. Node.js 설치가 필요합니다."
-                                    exit 1
-                                }
-                                nvm use default || nvm install 20 || nvm install node
-                                nvm use default || nvm use 20 || nvm use node
-                            """
-                            // nvm 사용 후 경로 재설정
-                            nodePath = sh(script: 'export NVM_DIR="${HOME}/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && which node', returnStdout: true).trim()
-                            npmPath = sh(script: 'export NVM_DIR="${HOME}/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && which npm', returnStdout: true).trim()
+                            echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm 확인 중..."
+                            def nvmCheck = sh(script: '''
+                                export NVM_DIR="${HOME}/.nvm"
+                                if [ -s "$NVM_DIR/nvm.sh" ]; then
+                                    . "$NVM_DIR/nvm.sh"
+                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                    which node 2>/dev/null || echo ""
+                                else
+                                    echo ""
+                                fi
+                            ''', returnStdout: true).trim()
+                            
+                            if (nvmCheck) {
+                                nodePath = nvmCheck
+                                npmPath = sh(script: '''
+                                    export NVM_DIR="${HOME}/.nvm"
+                                    . "$NVM_DIR/nvm.sh"
+                                    which npm 2>/dev/null || echo ""
+                                ''', returnStdout: true).trim()
+                            }
                         }
                         
                         if (!nodePath || !npmPath) {
-                            error "❌ Node.js/npm을 찾을 수 없습니다. Jenkins 에이전트에 Node.js를 설치해주세요."
+                            error """
+❌ Node.js/npm을 찾을 수 없습니다.
+
+Jenkins 에이전트에 Node.js를 설치해주세요:
+
+방법 1: nvm 설치
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.nvm/nvm.sh
+nvm install 20
+nvm use 20
+
+방법 2: 직접 설치
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+현재 PATH: ${env.PATH}
+"""
                         }
                         
                         echo "✅ Node.js 경로: ${nodePath}"
                         echo "✅ npm 경로: ${npmPath}"
                         
                         // PATH에 Node.js 경로 추가
-                        def nodeBinDir = sh(script: 'dirname $(which node 2>/dev/null || echo /usr/local/bin)', returnStdout: true).trim()
+                        def nodeBinDir = sh(script: "dirname ${nodePath} 2>/dev/null || echo /usr/local/bin", returnStdout: true).trim()
                         env.PATH = "${nodeBinDir}:${env.PATH}"
+                        echo "✅ PATH 업데이트: ${env.PATH}"
                         
                         echo "📦 의존성 설치 중..."
                         sh "npm install --legacy-peer-deps"
