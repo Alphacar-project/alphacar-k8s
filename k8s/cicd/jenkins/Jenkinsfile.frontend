@@ -125,11 +125,20 @@ pipeline {
                         }
                         withSonarQubeEnv('sonarqube') {
                             sh """
+                                echo "🔍 SonarQube 스캔 시작..."
+                                echo "📊 커버리지 리포트 경로 확인:"
+                                ls -la coverage/lcov.info 2>/dev/null || echo "⚠️ coverage/lcov.info 파일이 없습니다"
+                                
                                 sonar-scanner \\
                                     -Dsonar.projectKey=alphacar-frontend \\
-                                    -Dsonar.sources=. \\
+                                    -Dsonar.sources=app,components,lib \\
                                     -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 \\
-                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info || true
+                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                    -Dsonar.sourceEncoding=UTF-8 || {
+                                        echo "⚠️ SonarQube 스캔 실패, 하지만 빌드는 계속 진행합니다"
+                                        exit 0
+                                    }
+                                echo "✅ SonarQube 스캔 완료"
                             """
                         }
                     }
