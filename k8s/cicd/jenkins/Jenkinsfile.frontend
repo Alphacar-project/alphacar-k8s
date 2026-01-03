@@ -127,7 +127,9 @@ pipeline {
                         // nvm이 있는 경우 사용 시도 (여러 사용자 홈 디렉토리 확인)
                         if (!nodePath || !npmPath) {
                             echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm 확인 중..."
-                            echo "현재 사용자: ${env.USER:-unknown}, 홈 디렉토리: ${env.HOME:-unknown}"
+                            def currentUser = env.USER ?: 'unknown'
+                            def currentHome = env.HOME ?: 'unknown'
+                            echo "현재 사용자: ${currentUser}, 홈 디렉토리: ${currentHome}"
                             
                             // 여러 사용자의 nvm 경로 확인
                             def nvmCheck = sh(script: '''
