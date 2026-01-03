@@ -194,6 +194,8 @@ pipeline {
                                         -Dsonar.javascript.lcov.reportPaths=\${COVERAGE_PATH} \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.exclusions=**/*.css \\
+                                        -Dsonar.coverage.exclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx \\
+                                        -Dsonar.javascript.coveragePlugin.lcov.reportPaths=\${COVERAGE_PATH} \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL}
 
