@@ -103,183 +103,22 @@ pipeline {
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
-                // 테스트 실행 및 SonarQube 분석 (실패 시 빌드 중단)
+                // Docker 컨테이너에서 테스트 실행 및 SonarQube 분석
                 dir('dev/alphacar/frontend') {
                     script {
-                        // Node.js/npm 경로 확인 및 설정
-                        echo "🔍 Node.js/npm 경로 찾는 중..."
-                        def nodePath = sh(script: 'which node 2>/dev/null || echo ""', returnStdout: true).trim()
-                        def npmPath = sh(script: 'which npm 2>/dev/null || echo ""', returnStdout: true).trim()
+                        echo "🐳 Docker 컨테이너에서 테스트 실행 중..."
                         
-                        // 여러 일반적인 경로에서 Node.js 찾기
-                        if (!nodePath) {
-                            echo "⚠️ PATH에서 Node.js를 찾을 수 없습니다. 일반적인 경로에서 검색 중..."
-                            nodePath = sh(script: '''
-                                for path in /usr/local/bin/node /usr/bin/node /opt/nodejs/bin/node ~/.nvm/versions/node/*/bin/node; do
-                                    if [ -f "$path" ] 2>/dev/null; then
-                                        echo "$path"
-                                        break
-                                    fi
-                                done
-                            ''', returnStdout: true).trim()
-                        }
-                        
-                        // nvm이 있는 경우 사용 시도 (여러 사용자 홈 디렉토리 확인)
-                        if (!nodePath || !npmPath) {
-                            echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm 확인 중..."
-                            def currentUser = env.USER ?: 'unknown'
-                            def currentHome = env.HOME ?: 'unknown'
-                            echo "현재 사용자: ${currentUser}, 홈 디렉토리: ${currentHome}"
-                            
-                            // 여러 사용자의 nvm 경로 확인 (더 확실한 방법)
-                            def nvmCheck = sh(script: '''
-                                # /home/ubuntu/.nvm 확인 (가장 가능성 높음)
-                                if [ -s "/home/ubuntu/.nvm/nvm.sh" ]; then
-                                    export NVM_DIR="/home/ubuntu/.nvm"
-                                    . "$NVM_DIR/nvm.sh"
-                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    NODE_PATH=$(which node 2>/dev/null)
-                                    if [ -n "$NODE_PATH" ]; then
-                                        echo "$NODE_PATH"
-                                        exit 0
-                                    fi
-                                    # which가 실패하면 직접 경로 확인
-                                    if [ -f "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/node" ]; then
-                                        echo "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/node"
-                                        exit 0
-                                    fi
-                                    # 다른 버전도 확인
-                                    for node_version in /home/ubuntu/.nvm/versions/node/*/bin/node; do
-                                        if [ -f "$node_version" ]; then
-                                            echo "$node_version"
-                                            exit 0
-                                        fi
-                                    done
-                                fi
-                                
-                                # /var/lib/jenkins/.nvm 확인
-                                if [ -s "/var/lib/jenkins/.nvm/nvm.sh" ]; then
-                                    export NVM_DIR="/var/lib/jenkins/.nvm"
-                                    . "$NVM_DIR/nvm.sh"
-                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    NODE_PATH=$(which node 2>/dev/null)
-                                    if [ -n "$NODE_PATH" ]; then
-                                        echo "$NODE_PATH"
-                                        exit 0
-                                    fi
-                                fi
-                                
-                                # 현재 사용자 홈 디렉토리 확인
-                                if [ -s "$HOME/.nvm/nvm.sh" ]; then
-                                    export NVM_DIR="$HOME/.nvm"
-                                    . "$NVM_DIR/nvm.sh"
-                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    NODE_PATH=$(which node 2>/dev/null)
-                                    if [ -n "$NODE_PATH" ]; then
-                                        echo "$NODE_PATH"
-                                        exit 0
-                                    fi
-                                fi
-                                
-                                echo ""
-                            ''', returnStdout: true).trim()
-                            
-                            if (nvmCheck) {
-                                nodePath = nvmCheck
-                                echo "✅ nvm에서 Node.js 찾음: ${nodePath}"
-                                
-                                // npm 경로도 같은 방식으로 찾기
-                                npmPath = sh(script: '''
-                                    # /home/ubuntu/.nvm 확인
-                                    if [ -s "/home/ubuntu/.nvm/nvm.sh" ]; then
-                                        export NVM_DIR="/home/ubuntu/.nvm"
-                                        . "$NVM_DIR/nvm.sh"
-                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        NPM_PATH=$(which npm 2>/dev/null)
-                                        if [ -n "$NPM_PATH" ]; then
-                                            echo "$NPM_PATH"
-                                            exit 0
-                                        fi
-                                        # which가 실패하면 직접 경로 확인
-                                        if [ -f "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/npm" ]; then
-                                            echo "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/npm"
-                                            exit 0
-                                        fi
-                                        # 다른 버전도 확인
-                                        for npm_version in /home/ubuntu/.nvm/versions/node/*/bin/npm; do
-                                            if [ -f "$npm_version" ]; then
-                                                echo "$npm_version"
-                                                exit 0
-                                            fi
-                                        done
-                                    fi
-                                    
-                                    # /var/lib/jenkins/.nvm 확인
-                                    if [ -s "/var/lib/jenkins/.nvm/nvm.sh" ]; then
-                                        export NVM_DIR="/var/lib/jenkins/.nvm"
-                                        . "$NVM_DIR/nvm.sh"
-                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        NPM_PATH=$(which npm 2>/dev/null)
-                                        if [ -n "$NPM_PATH" ]; then
-                                            echo "$NPM_PATH"
-                                            exit 0
-                                        fi
-                                    fi
-                                    
-                                    # 현재 사용자 홈 디렉토리 확인
-                                    if [ -s "$HOME/.nvm/nvm.sh" ]; then
-                                        export NVM_DIR="$HOME/.nvm"
-                                        . "$NVM_DIR/nvm.sh"
-                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        NPM_PATH=$(which npm 2>/dev/null)
-                                        if [ -n "$NPM_PATH" ]; then
-                                            echo "$NPM_PATH"
-                                            exit 0
-                                        fi
-                                    fi
-                                    
-                                    echo ""
-                                ''', returnStdout: true).trim()
-                                
-                                if (npmPath) {
-                                    echo "✅ nvm에서 npm 찾음: ${npmPath}"
-                                }
-                            }
-                        }
-                        
-                        if (!nodePath || !npmPath) {
-                            error """
-❌ Node.js/npm을 찾을 수 없습니다.
-
-Jenkins 에이전트에 Node.js를 설치해주세요:
-
-방법 1: nvm 설치
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-source ~/.nvm/nvm.sh
-nvm install 20
-nvm use 20
-
-방법 2: 직접 설치
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-현재 PATH: ${env.PATH}
-"""
-                        }
-                        
-                        echo "✅ Node.js 경로: ${nodePath}"
-                        echo "✅ npm 경로: ${npmPath}"
-                        
-                        // PATH에 Node.js 경로 추가
-                        def nodeBinDir = sh(script: "dirname ${nodePath} 2>/dev/null || echo /usr/local/bin", returnStdout: true).trim()
-                        env.PATH = "${nodeBinDir}:${env.PATH}"
-                        echo "✅ PATH 업데이트: ${env.PATH}"
-                        
-                        echo "📦 의존성 설치 중..."
-                        sh "npm install --legacy-peer-deps"
-                        
-                        echo "🧪 테스트 실행 및 커버리지 리포트 생성 중..."
-                        sh "npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음'"
+                        // Docker를 사용하여 테스트 실행 (Node.js 설치 불필요)
+                        sh """
+                            docker run --rm \\
+                                -v \$(pwd):/app \\
+                                -w /app \\
+                                node:20-alpine \\
+                                sh -c "
+                                    npm install --legacy-peer-deps && \\
+                                    npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음'
+                                "
+                        """
                         
                         // 커버리지 리포트 파일 확인
                         sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
