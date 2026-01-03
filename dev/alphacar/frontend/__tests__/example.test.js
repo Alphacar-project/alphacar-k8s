@@ -2,6 +2,7 @@
  * 기본 테스트 파일
  * SonarQube 커버리지 리포트 생성을 위한 최소한의 테스트
  * Updated: 2026-01-03 - SonarQube 분석 트리거를 위한 업데이트
+ * Updated: 2026-01-03 - Jenkins 빌드 트리거를 위한 업데이트
  */
 
 describe('Example Test Suite', () => {
