@@ -138,7 +138,23 @@ pipeline {
                                     export NVM_DIR="/home/ubuntu/.nvm"
                                     . "$NVM_DIR/nvm.sh"
                                     nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    which node 2>/dev/null && exit 0
+                                    NODE_PATH=$(which node 2>/dev/null)
+                                    if [ -n "$NODE_PATH" ]; then
+                                        echo "$NODE_PATH"
+                                        exit 0
+                                    fi
+                                    # which가 실패하면 직접 경로 확인
+                                    if [ -f "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/node" ]; then
+                                        echo "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/node"
+                                        exit 0
+                                    fi
+                                    # 다른 버전도 확인
+                                    for node_version in /home/ubuntu/.nvm/versions/node/*/bin/node; do
+                                        if [ -f "$node_version" ]; then
+                                            echo "$node_version"
+                                            exit 0
+                                        fi
+                                    done
                                 fi
                                 
                                 # /var/lib/jenkins/.nvm 확인
@@ -146,7 +162,11 @@ pipeline {
                                     export NVM_DIR="/var/lib/jenkins/.nvm"
                                     . "$NVM_DIR/nvm.sh"
                                     nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    which node 2>/dev/null && exit 0
+                                    NODE_PATH=$(which node 2>/dev/null)
+                                    if [ -n "$NODE_PATH" ]; then
+                                        echo "$NODE_PATH"
+                                        exit 0
+                                    fi
                                 fi
                                 
                                 # 현재 사용자 홈 디렉토리 확인
@@ -154,7 +174,11 @@ pipeline {
                                     export NVM_DIR="$HOME/.nvm"
                                     . "$NVM_DIR/nvm.sh"
                                     nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    which node 2>/dev/null && exit 0
+                                    NODE_PATH=$(which node 2>/dev/null)
+                                    if [ -n "$NODE_PATH" ]; then
+                                        echo "$NODE_PATH"
+                                        exit 0
+                                    fi
                                 fi
                                 
                                 echo ""
@@ -171,7 +195,23 @@ pipeline {
                                         export NVM_DIR="/home/ubuntu/.nvm"
                                         . "$NVM_DIR/nvm.sh"
                                         nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        which npm 2>/dev/null && exit 0
+                                        NPM_PATH=$(which npm 2>/dev/null)
+                                        if [ -n "$NPM_PATH" ]; then
+                                            echo "$NPM_PATH"
+                                            exit 0
+                                        fi
+                                        # which가 실패하면 직접 경로 확인
+                                        if [ -f "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/npm" ]; then
+                                            echo "/home/ubuntu/.nvm/versions/node/v20.19.6/bin/npm"
+                                            exit 0
+                                        fi
+                                        # 다른 버전도 확인
+                                        for npm_version in /home/ubuntu/.nvm/versions/node/*/bin/npm; do
+                                            if [ -f "$npm_version" ]; then
+                                                echo "$npm_version"
+                                                exit 0
+                                            fi
+                                        done
                                     fi
                                     
                                     # /var/lib/jenkins/.nvm 확인
@@ -179,7 +219,11 @@ pipeline {
                                         export NVM_DIR="/var/lib/jenkins/.nvm"
                                         . "$NVM_DIR/nvm.sh"
                                         nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        which npm 2>/dev/null && exit 0
+                                        NPM_PATH=$(which npm 2>/dev/null)
+                                        if [ -n "$NPM_PATH" ]; then
+                                            echo "$NPM_PATH"
+                                            exit 0
+                                        fi
                                     fi
                                     
                                     # 현재 사용자 홈 디렉토리 확인
@@ -187,7 +231,11 @@ pipeline {
                                         export NVM_DIR="$HOME/.nvm"
                                         . "$NVM_DIR/nvm.sh"
                                         nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                        which npm 2>/dev/null && exit 0
+                                        NPM_PATH=$(which npm 2>/dev/null)
+                                        if [ -n "$NPM_PATH" ]; then
+                                            echo "$NPM_PATH"
+                                            exit 0
+                                        fi
                                     fi
                                     
                                     echo ""
