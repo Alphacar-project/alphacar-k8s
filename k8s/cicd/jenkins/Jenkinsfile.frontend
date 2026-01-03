@@ -225,36 +225,40 @@ pipeline {
                         error "❌ 매니페스트 파일을 찾을 수 없습니다: ${yamlPath}"
                     }
 
-                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
-                    
-                    // ECR 이미지 경로로 업데이트
-                    sh """
-                        sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
-                    """
-                    
                     // Git 커밋 및 푸시
                     withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
                             
-                            # 현재 브랜치 확인 및 main 브랜치로 전환
+                            # 현재 브랜치 확인
                             CURRENT_BRANCH=\$(git rev-parse --abbrev-ref HEAD)
                             echo "현재 브랜치: \${CURRENT_BRANCH}"
                             
                             # detached HEAD 상태인 경우 main 브랜치로 checkout
                             if [ "\${CURRENT_BRANCH}" = "HEAD" ]; then
                                 echo "⚠️ Detached HEAD 상태 감지 - main 브랜치로 전환"
-                                git checkout -b main || git checkout main || true
+                                # 원격 main 브랜치를 추적하는 로컬 브랜치 생성
+                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main:main || true
+                                git checkout main || {
+                                    echo "⚠️ main 브랜치 checkout 실패 - 새로 생성"
+                                    git checkout -b main
+                                    git branch --set-upstream-to=origin/main main || true
+                                }
                             fi
                             
-                            # 원격 저장소의 최신 변경사항 가져오기 (커밋 전에 먼저 pull)
+                            # 원격 저장소의 최신 변경사항 가져오기 (파일 수정 전에 먼저 pull)
                             echo "📥 원격 저장소 최신 변경사항 가져오기..."
                             git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
                             git pull --rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
                                 echo "⚠️ Rebase 실패 - merge 시도"
                                 git pull --no-rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
                             }
+                            
+                            echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
+                            
+                            # ECR 이미지 경로로 업데이트
+                            sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
                             
                             # 매니페스트 파일 업데이트
                             git add ${yamlPath}
