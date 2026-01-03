@@ -83,7 +83,7 @@ pipeline {
             }
         }
 
-        stage('1. Prepare & SonarQube') {
+        stage('1. Prepare & Unit Test & SonarQube') {
             steps {
                 script {
                     // 이미지 태그용 Git SHA 추출
@@ -102,10 +102,19 @@ pipeline {
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
-                // SonarQube 분석 (연결 문제 해결됨, 실패해도 계속 진행)
+                // 테스트 실행 및 SonarQube 분석 (연결 문제 해결됨, 실패해도 계속 진행)
                 dir('dev/alphacar/frontend') {
                     catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                         script {
+                            echo "📦 의존성 설치 중..."
+                            sh "npm install --legacy-peer-deps"
+                            
+                            echo "🧪 테스트 실행 및 커버리지 리포트 생성 중..."
+                            sh "npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음'"
+                            
+                            // 커버리지 리포트 파일 확인
+                            sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
+                            
                             try {
                                 def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                                 env.PATH = "${sonarPath}/bin:${env.PATH}"
@@ -119,7 +128,8 @@ pipeline {
                                 sonar-scanner \\
                                     -Dsonar.projectKey=alphacar-frontend \\
                                     -Dsonar.sources=. \\
-                                    -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || true
+                                    -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 \\
+                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info || true
                             """
                         }
                     }
