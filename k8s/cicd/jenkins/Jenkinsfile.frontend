@@ -182,7 +182,6 @@ pipeline {
                                         -Dsonar.coverage.exclusions=**/* \\
                                         -Dsonar.cpd.exclusions=**/* \\
                                         -Dsonar.javascript.analyzer.maxFileSize=500 \\
-                                        -Dsonar.analysis.mode=preview \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL}
 
