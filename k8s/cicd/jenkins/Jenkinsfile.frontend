@@ -224,22 +224,39 @@ pipeline {
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
+                            
+                            # 현재 브랜치 확인 및 main 브랜치로 전환
+                            CURRENT_BRANCH=\$(git rev-parse --abbrev-ref HEAD)
+                            echo "현재 브랜치: \${CURRENT_BRANCH}"
+                            
+                            # detached HEAD 상태인 경우 main 브랜치로 checkout
+                            if [ "\${CURRENT_BRANCH}" = "HEAD" ]; then
+                                echo "⚠️ Detached HEAD 상태 감지 - main 브랜치로 전환"
+                                git checkout -b main || git checkout main || true
+                            fi
+                            
+                            # 원격 저장소의 최신 변경사항 가져오기 (커밋 전에 먼저 pull)
+                            echo "📥 원격 저장소 최신 변경사항 가져오기..."
+                            git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                            git pull --rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
+                                echo "⚠️ Rebase 실패 - merge 시도"
+                                git pull --no-rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                            }
+                            
+                            # 매니페스트 파일 업데이트
                             git add ${yamlPath}
                             
-                            # 변경사항이 있을 때만 커밋
+                            # 변경사항이 있을 때만 커밋 및 푸시
                             if [ -n "\$(git status --porcelain)" ]; then
                                 git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                 echo "✅ 로컬 커밋 완료"
                                 
-                                # 원격 저장소의 최신 변경사항 가져오기 및 병합
-                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
-                                git pull --rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
-                                    echo "⚠️ Rebase 실패 - merge 시도"
-                                    git pull --no-rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
-                                }
+                                # 현재 브랜치 이름 확인
+                                BRANCH_NAME=\$(git rev-parse --abbrev-ref HEAD)
+                                echo "푸시할 브랜치: \${BRANCH_NAME}"
                                 
                                 # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
-                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git \${BRANCH_NAME}:main
                                 echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
                             else
                                 echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
