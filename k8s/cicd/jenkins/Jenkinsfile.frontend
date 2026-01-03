@@ -165,9 +165,16 @@ pipeline {
                                     fi
 
                                     echo "🚀 SonarQube 스캔 실행 중..."
+                                    # 실제 존재하는 소스 디렉토리 확인
+                                    SOURCES="app"
+                                    [ -d "components" ] && SOURCES="\${SOURCES},components"
+                                    [ -d "lib" ] && SOURCES="\${SOURCES},lib"
+                                    [ -d "pages" ] && SOURCES="\${SOURCES},pages"
+                                    echo "📁 분석할 소스 디렉토리: \${SOURCES}"
+                                    
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
-                                        -Dsonar.sources=app,components,lib \\
+                                        -Dsonar.sources=\${SOURCES} \\
                                         -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
