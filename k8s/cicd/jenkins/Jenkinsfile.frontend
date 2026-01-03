@@ -124,26 +124,51 @@ pipeline {
                             ''', returnStdout: true).trim()
                         }
                         
-                        // nvm이 있는 경우 사용 시도
+                        // nvm이 있는 경우 사용 시도 (여러 사용자 홈 디렉토리 확인)
                         if (!nodePath || !npmPath) {
                             echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm 확인 중..."
+                            echo "현재 사용자: ${env.USER:-unknown}, 홈 디렉토리: ${env.HOME:-unknown}"
+                            
+                            // 여러 사용자의 nvm 경로 확인
                             def nvmCheck = sh(script: '''
-                                export NVM_DIR="${HOME}/.nvm"
-                                if [ -s "$NVM_DIR/nvm.sh" ]; then
-                                    . "$NVM_DIR/nvm.sh"
-                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                    which node 2>/dev/null || echo ""
-                                else
-                                    echo ""
-                                fi
+                                for nvm_user in ubuntu jenkins ec2-user root; do
+                                    for nvm_home in /home/$nvm_user /var/lib/jenkins ~; do
+                                        NVM_DIR="$nvm_home/.nvm"
+                                        if [ -s "$NVM_DIR/nvm.sh" ]; then
+                                            export NVM_DIR
+                                            . "$NVM_DIR/nvm.sh"
+                                            nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                            NODE_PATH=$(which node 2>/dev/null)
+                                            if [ -n "$NODE_PATH" ]; then
+                                                echo "$NODE_PATH"
+                                                exit 0
+                                            fi
+                                        fi
+                                    done
+                                done
+                                echo ""
                             ''', returnStdout: true).trim()
                             
                             if (nvmCheck) {
                                 nodePath = nvmCheck
+                                // npm 경로도 같은 방식으로 찾기
                                 npmPath = sh(script: '''
-                                    export NVM_DIR="${HOME}/.nvm"
-                                    . "$NVM_DIR/nvm.sh"
-                                    which npm 2>/dev/null || echo ""
+                                    for nvm_user in ubuntu jenkins ec2-user root; do
+                                        for nvm_home in /home/$nvm_user /var/lib/jenkins ~; do
+                                            NVM_DIR="$nvm_home/.nvm"
+                                            if [ -s "$NVM_DIR/nvm.sh" ]; then
+                                                export NVM_DIR
+                                                . "$NVM_DIR/nvm.sh"
+                                                nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                                NPM_PATH=$(which npm 2>/dev/null)
+                                                if [ -n "$NPM_PATH" ]; then
+                                                    echo "$NPM_PATH"
+                                                    exit 0
+                                                fi
+                                            fi
+                                        done
+                                    done
+                                    echo ""
                                 ''', returnStdout: true).trim()
                             }
                         }
