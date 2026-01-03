@@ -16,6 +16,8 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# npm config 설정: Next.js가 자동으로 패키지를 설치할 때 --legacy-peer-deps 사용
+RUN npm config set legacy-peer-deps true
 RUN npm run build
 
 # 3. 실행
