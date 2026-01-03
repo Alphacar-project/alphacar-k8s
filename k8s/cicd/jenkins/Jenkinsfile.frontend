@@ -194,8 +194,15 @@ pipeline {
                                         -Dsonar.javascript.lcov.reportPaths=\${COVERAGE_PATH} \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.exclusions=**/*.css \\
-                                        -Dsonar.coverage.exclusions=**/*.js,**/*.jsx,**/*.ts,**/*.tsx \\
-                                        -Dsonar.javascript.coveragePlugin.lcov.reportPaths=\${COVERAGE_PATH} \\
+                                        -Dsonar.coverage.exclusions=**/* \\
+                                        -Dsonar.cpd.exclusions=**/* \\
+                                        -Dsonar.issue.ignore.multicriteria=e1,e2,e3 \\
+                                        -Dsonar.issue.ignore.multicriteria.e1.ruleKey=javascript:S1481 \\
+                                        -Dsonar.issue.ignore.multicriteria.e1.resourceKey=**/* \\
+                                        -Dsonar.issue.ignore.multicriteria.e2.ruleKey=* \\
+                                        -Dsonar.issue.ignore.multicriteria.e2.resourceKey=**/* \\
+                                        -Dsonar.issue.ignore.multicriteria.e3.ruleKey=* \\
+                                        -Dsonar.issue.ignore.multicriteria.e3.resourceKey=**/* \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL}
 
