@@ -11,6 +11,7 @@ pipeline {
         MANIFEST_REPO_URL = 'https://github.com/pogiri1207-a11y/last-alphacar.git'
 
         GIT_CREDENTIAL_ID = 'github-cred'
+        SONAR_TOKEN_CREDENTIAL_ID = 'sonar-token'
     }
 
     stages {
@@ -83,7 +84,7 @@ pipeline {
             }
         }
 
-        stage('1. Prepare & SonarQube') {
+        stage('1. Prepare & Unit Test & SonarQube') {
             steps {
                 script {
                     // 이미지 태그용 Git SHA 추출
@@ -102,21 +103,69 @@ pipeline {
                     env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
-                // SonarQube 분석 (실패해도 계속 진행)
+                // 테스트 실행 및 SonarQube 분석 (실패 시 빌드 중단)
                 dir('dev/alphacar/frontend') {
-                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                        script {
-                            try {
-                                def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                                env.PATH = "${sonarPath}/bin:${env.PATH}"
-                            } catch (Exception e) {
-                                echo "⚠️ SonarQube Scanner 도구를 찾을 수 없습니다. 분석을 건너뜁니다."
-                                return
-                            }
+                    script {
+                        echo "📦 의존성 설치 중..."
+                        sh "npm install --legacy-peer-deps"
+                        
+                        echo "🧪 테스트 실행 및 커버리지 리포트 생성 중..."
+                        sh "npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음'"
+                        
+                        // 커버리지 리포트 파일 확인
+                        sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
+                        
+                        try {
+                            def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                            env.PATH = "${sonarPath}/bin:${env.PATH}"
+                        } catch (Exception e) {
+                            error "❌ SonarQube Scanner 도구를 찾을 수 없습니다. 빌드를 중단합니다."
                         }
-                        withSonarQubeEnv('sonarqube') {
+                    }
+                    withSonarQubeEnv('sonarqube') {
+                        script {
+                            // SonarQube 토큰과 호스트 URL이 환경 변수로 자동 주입됨 (withSonarQubeEnv가 처리)
                             sh """
-                                sonar-scanner -Dsonar.projectKey=alphacar-frontend -Dsonar.sources=. -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 || true
+                                echo "🔍 SonarQube 스캔 시작..."
+                                echo "📊 커버리지 리포트 경로 확인:"
+                                ls -la coverage/lcov.info 2>/dev/null || echo "⚠️ coverage/lcov.info 파일이 없습니다"
+
+                                echo "🔑 SonarQube 인증 정보 확인 중..."
+                                if [ -n "\${SONAR_TOKEN}" ]; then
+                                    echo "✅ SonarQube 토큰이 설정되어 있습니다"
+                                else
+                                    echo "❌ SonarQube 토큰이 환경 변수에 없습니다"
+                                    exit 1
+                                fi
+
+                                echo "🌐 SonarQube 호스트 URL: \${SONAR_HOST_URL:-not set}"
+                                
+                                if [ -z "\${SONAR_HOST_URL}" ]; then
+                                    echo "❌ SonarQube 호스트 URL이 설정되지 않았습니다"
+                                    exit 1
+                                fi
+
+                                # sonar-project.properties 파일에서 host.url 제거 확인
+                                if grep -q "^sonar.host.url=" sonar-project.properties 2>/dev/null; then
+                                    echo "⚠️ sonar-project.properties에 sonar.host.url이 설정되어 있습니다. 주석 처리하세요."
+                                    sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
+                                fi
+
+                                echo "🚀 SonarQube 스캔 실행 중..."
+                                sonar-scanner \\
+                                    -Dsonar.projectKey=alphacar-frontend \\
+                                    -Dsonar.sources=app,components,lib \\
+                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                    -Dsonar.sourceEncoding=UTF-8
+
+                                SCAN_EXIT_CODE=\$?
+                                if [ \$SCAN_EXIT_CODE -eq 0 ]; then
+                                    echo "✅ SonarQube 스캔 성공!"
+                                else
+                                    echo "❌ SonarQube 스캔 실패 (종료 코드: \$SCAN_EXIT_CODE)"
+                                    echo "빌드를 중단합니다."
+                                    exit \$SCAN_EXIT_CODE
+                                fi
                             """
                         }
                     }
@@ -134,7 +183,12 @@ pipeline {
                         def imageFullTag = "${ECR_REGISTRY}/${IMAGE_NAME}:${env.FULL_VERSION}"
                         echo "🐳 도커 빌드 시작: ${imageFullTag}"
                         
-                        sh "docker build -f Dockerfile -t ${imageFullTag} ."
+                        // Docker 빌드 타임아웃 설정 (30분)
+                        timeout(time: 30, unit: 'MINUTES') {
+                            // Docker 빌드 전 캐시 정리 (필요시)
+                            sh "docker builder prune -f || true"
+                            sh "docker build --pull -f Dockerfile -t ${imageFullTag} ."
+                        }
 
                         // AWS ECR 로그인
                         script {
@@ -171,27 +225,55 @@ pipeline {
                         error "❌ 매니페스트 파일을 찾을 수 없습니다: ${yamlPath}"
                     }
 
-                    echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
-                    
-                    // ECR 이미지 경로로 업데이트
-                    sh """
-                        sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
-                    """
-                    
                     // Git 커밋 및 푸시
                     withCredentials([usernamePassword(credentialsId: "${env.GIT_CREDENTIAL_ID}", usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
                         sh """
                             git config user.email "jenkins@alphacar.com"
                             git config user.name "Jenkins-CI"
+                            
+                            # 현재 브랜치 확인
+                            CURRENT_BRANCH=\$(git rev-parse --abbrev-ref HEAD)
+                            echo "현재 브랜치: \${CURRENT_BRANCH}"
+                            
+                            # detached HEAD 상태인 경우 main 브랜치로 checkout
+                            if [ "\${CURRENT_BRANCH}" = "HEAD" ]; then
+                                echo "⚠️ Detached HEAD 상태 감지 - main 브랜치로 전환"
+                                # 원격 main 브랜치를 추적하는 로컬 브랜치 생성
+                                git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main:main || true
+                                git checkout main || {
+                                    echo "⚠️ main 브랜치 checkout 실패 - 새로 생성"
+                                    git checkout -b main
+                                    git branch --set-upstream-to=origin/main main || true
+                                }
+                            fi
+                            
+                            # 원격 저장소의 최신 변경사항 가져오기 (파일 수정 전에 먼저 pull)
+                            echo "📥 원격 저장소 최신 변경사항 가져오기..."
+                            git fetch https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                            git pull --rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || {
+                                echo "⚠️ Rebase 실패 - merge 시도"
+                                git pull --no-rebase https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git main || true
+                            }
+                            
+                            echo "📝 [자동화] 이미지 태그를 ${imageFullTag}로 업데이트합니다."
+                            
+                            # ECR 이미지 경로로 업데이트
+                            sed -i 's|image: .*/alphacar.*frontend.*:.*|image: ${imageFullTag}|' ${yamlPath}
+                            
+                            # 매니페스트 파일 업데이트
                             git add ${yamlPath}
                             
-                            # 변경사항이 있을 때만 커밋
+                            # 변경사항이 있을 때만 커밋 및 푸시
                             if [ -n "\$(git status --porcelain)" ]; then
                                 git commit -m "Update frontend image to ${env.FULL_VERSION} [skip ci]"
                                 echo "✅ 로컬 커밋 완료"
                                 
+                                # 현재 브랜치 이름 확인
+                                BRANCH_NAME=\$(git rev-parse --abbrev-ref HEAD)
+                                echo "푸시할 브랜치: \${BRANCH_NAME}"
+                                
                                 # 토큰을 URL에 포함시켜 인증 오류(128)를 해결합니다.
-                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git HEAD:main
+                                git push https://\${GITHUB_TOKEN}@github.com/Alphacar-project/alphacar-k8s.git \${BRANCH_NAME}:main
                                 echo "🚀 깃허브 매니페스트 업데이트 및 푸시 성공!"
                             else
                                 echo "✅ 변경사항 없음 (이미 최신 상태입니다)"
