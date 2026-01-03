@@ -134,51 +134,55 @@ pipeline {
                         }
                     }
                     
+                    // SonarQube 스캔 (withSonarQubeEnv와 withCredentials 함께 사용)
                     withSonarQubeEnv('sonarqube') {
-                        script {
-                            // SonarQube 토큰과 호스트 URL이 환경 변수로 자동 주입됨 (withSonarQubeEnv가 처리)
-                            sh """
-                                echo "🔍 SonarQube 스캔 시작..."
-                                echo "📊 커버리지 리포트 경로 확인:"
-                                ls -la coverage/lcov.info 2>/dev/null || echo "⚠️ coverage/lcov.info 파일이 없습니다"
+                        withCredentials([string(credentialsId: "${env.SONAR_TOKEN_CREDENTIAL_ID}", variable: 'SONAR_TOKEN')]) {
+                            script {
+                                sh """
+                                    echo "🔍 SonarQube 스캔 시작..."
+                                    echo "📊 커버리지 리포트 경로 확인:"
+                                    ls -la coverage/lcov.info 2>/dev/null || echo "⚠️ coverage/lcov.info 파일이 없습니다"
 
-                                echo "🔑 SonarQube 인증 정보 확인 중..."
-                                if [ -n "\${SONAR_TOKEN}" ]; then
-                                    echo "✅ SonarQube 토큰이 설정되어 있습니다"
-                                else
-                                    echo "❌ SonarQube 토큰이 환경 변수에 없습니다"
-                                    exit 1
-                                fi
+                                    echo "🔑 SonarQube 인증 정보 확인 중..."
+                                    if [ -n "\${SONAR_TOKEN}" ]; then
+                                        echo "✅ SonarQube 토큰이 설정되어 있습니다"
+                                    else
+                                        echo "❌ SonarQube 토큰이 환경 변수에 없습니다"
+                                        exit 1
+                                    fi
 
-                                echo "🌐 SonarQube 호스트 URL: \${SONAR_HOST_URL:-not set}"
-                                
-                                if [ -z "\${SONAR_HOST_URL}" ]; then
-                                    echo "❌ SonarQube 호스트 URL이 설정되지 않았습니다"
-                                    exit 1
-                                fi
+                                    echo "🌐 SonarQube 호스트 URL: \${SONAR_HOST_URL:-not set}"
+                                    
+                                    if [ -z "\${SONAR_HOST_URL}" ]; then
+                                        echo "❌ SonarQube 호스트 URL이 설정되지 않았습니다"
+                                        exit 1
+                                    fi
 
-                                # sonar-project.properties 파일에서 host.url 제거 확인
-                                if grep -q "^sonar.host.url=" sonar-project.properties 2>/dev/null; then
-                                    echo "⚠️ sonar-project.properties에 sonar.host.url이 설정되어 있습니다. 주석 처리하세요."
-                                    sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
-                                fi
+                                    # sonar-project.properties 파일에서 host.url 제거 확인
+                                    if grep -q "^sonar.host.url=" sonar-project.properties 2>/dev/null; then
+                                        echo "⚠️ sonar-project.properties에 sonar.host.url이 설정되어 있습니다. 주석 처리하세요."
+                                        sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
+                                    fi
 
-                                echo "🚀 SonarQube 스캔 실행 중..."
-                                sonar-scanner \\
-                                    -Dsonar.projectKey=alphacar-frontend \\
-                                    -Dsonar.sources=app,components,lib \\
-                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
-                                    -Dsonar.sourceEncoding=UTF-8
+                                    echo "🚀 SonarQube 스캔 실행 중..."
+                                    sonar-scanner \\
+                                        -Dsonar.projectKey=alphacar-frontend \\
+                                        -Dsonar.sources=app,components,lib \\
+                                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                        -Dsonar.sourceEncoding=UTF-8 \\
+                                        -Dsonar.token=\${SONAR_TOKEN} \\
+                                        -Dsonar.host.url=\${SONAR_HOST_URL}
 
-                                SCAN_EXIT_CODE=\$?
-                                if [ \$SCAN_EXIT_CODE -eq 0 ]; then
-                                    echo "✅ SonarQube 스캔 성공!"
-                                else
-                                    echo "❌ SonarQube 스캔 실패 (종료 코드: \$SCAN_EXIT_CODE)"
-                                    echo "빌드를 중단합니다."
-                                    exit \$SCAN_EXIT_CODE
-                                fi
-                            """
+                                    SCAN_EXIT_CODE=\$?
+                                    if [ \$SCAN_EXIT_CODE -eq 0 ]; then
+                                        echo "✅ SonarQube 스캔 성공!"
+                                    else
+                                        echo "❌ SonarQube 스캔 실패 (종료 코드: \$SCAN_EXIT_CODE)"
+                                        echo "빌드를 중단합니다."
+                                        exit \$SCAN_EXIT_CODE
+                                    fi
+                                """
+                            }
                         }
                     }
                 }
