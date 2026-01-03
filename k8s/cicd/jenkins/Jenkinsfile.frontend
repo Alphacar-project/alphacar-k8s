@@ -106,6 +106,37 @@ pipeline {
                 // 테스트 실행 및 SonarQube 분석 (실패 시 빌드 중단)
                 dir('dev/alphacar/frontend') {
                     script {
+                        // Node.js/npm 경로 확인 및 설정
+                        def nodePath = sh(script: 'which node || echo ""', returnStdout: true).trim()
+                        def npmPath = sh(script: 'which npm || echo ""', returnStdout: true).trim()
+                        
+                        if (!nodePath || !npmPath) {
+                            echo "⚠️ Node.js/npm을 찾을 수 없습니다. nvm을 사용하여 설치 시도..."
+                            sh """
+                                export NVM_DIR="\${HOME}/.nvm"
+                                [ -s "\$NVM_DIR/nvm.sh" ] && \\. "\$NVM_DIR/nvm.sh" || {
+                                    echo "❌ nvm이 설치되어 있지 않습니다. Node.js 설치가 필요합니다."
+                                    exit 1
+                                }
+                                nvm use default || nvm install 20 || nvm install node
+                                nvm use default || nvm use 20 || nvm use node
+                            """
+                            // nvm 사용 후 경로 재설정
+                            nodePath = sh(script: 'export NVM_DIR="${HOME}/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && which node', returnStdout: true).trim()
+                            npmPath = sh(script: 'export NVM_DIR="${HOME}/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && which npm', returnStdout: true).trim()
+                        }
+                        
+                        if (!nodePath || !npmPath) {
+                            error "❌ Node.js/npm을 찾을 수 없습니다. Jenkins 에이전트에 Node.js를 설치해주세요."
+                        }
+                        
+                        echo "✅ Node.js 경로: ${nodePath}"
+                        echo "✅ npm 경로: ${npmPath}"
+                        
+                        // PATH에 Node.js 경로 추가
+                        def nodeBinDir = sh(script: 'dirname $(which node 2>/dev/null || echo /usr/local/bin)', returnStdout: true).trim()
+                        env.PATH = "${nodeBinDir}:${env.PATH}"
+                        
                         echo "📦 의존성 설치 중..."
                         sh "npm install --legacy-peer-deps"
                         
