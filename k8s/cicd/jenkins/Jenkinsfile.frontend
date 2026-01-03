@@ -174,7 +174,7 @@ pipeline {
                                     echo "📁 분석할 소스 디렉토리: \${SOURCES}"
                                     
                                     # 빠른 스캔을 위한 최적화된 설정
-                                    # 경고 메시지는 stderr로 리다이렉트하여 로그 정리
+                                    # baseline-browser-mapping 경고 메시지 필터링 (빌드에는 영향 없음)
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
                                         -Dsonar.sources=\${SOURCES} \\
@@ -185,9 +185,16 @@ pipeline {
                                         -Dsonar.javascript.analyzer.maxFileSize=500 \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL} \\
-                                        2>&1 | grep -v "baseline-browser-mapping" || true
-
-                                    SCAN_EXIT_CODE=\$?
+                                        2>&1 | grep -v "baseline-browser-mapping" | tee /tmp/sonar-scan.log || true
+                                    
+                                    # sonar-scanner의 실제 exit code 확인 (report-task.txt 파일 존재 여부로 판단)
+                                    SCAN_EXIT_CODE=0
+                                    if [ -f ".scannerwork/report-task.txt" ]; then
+                                        SCAN_EXIT_CODE=0
+                                    else
+                                        # report-task.txt가 없으면 스캔 실패로 간주
+                                        SCAN_EXIT_CODE=1
+                                    fi
                                     if [ \$SCAN_EXIT_CODE -eq 0 ]; then
                                         echo "✅ SonarQube 스캔 성공!"
                                     else
