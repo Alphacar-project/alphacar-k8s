@@ -122,7 +122,10 @@ pipeline {
                         
                         // 커버리지 리포트 파일 확인
                         sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
-                        
+                    }
+                    
+                    // SonarQube 스캔 (withSonarQubeEnv 블록 밖에서 tool 설정)
+                    script {
                         try {
                             def sonarPath = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
                             env.PATH = "${sonarPath}/bin:${env.PATH}"
@@ -130,6 +133,7 @@ pipeline {
                             error "❌ SonarQube Scanner 도구를 찾을 수 없습니다. 빌드를 중단합니다."
                         }
                     }
+                    
                     withSonarQubeEnv('sonarqube') {
                         script {
                             // SonarQube 토큰과 호스트 URL이 환경 변수로 자동 주입됨 (withSonarQubeEnv가 처리)
