@@ -131,47 +131,71 @@ pipeline {
                             def currentHome = env.HOME ?: 'unknown'
                             echo "현재 사용자: ${currentUser}, 홈 디렉토리: ${currentHome}"
                             
-                            // 여러 사용자의 nvm 경로 확인
+                            // 여러 사용자의 nvm 경로 확인 (더 확실한 방법)
                             def nvmCheck = sh(script: '''
-                                for nvm_user in ubuntu jenkins ec2-user root; do
-                                    for nvm_home in /home/$nvm_user /var/lib/jenkins ~; do
-                                        NVM_DIR="$nvm_home/.nvm"
-                                        if [ -s "$NVM_DIR/nvm.sh" ]; then
-                                            export NVM_DIR
-                                            . "$NVM_DIR/nvm.sh"
-                                            nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                            NODE_PATH=$(which node 2>/dev/null)
-                                            if [ -n "$NODE_PATH" ]; then
-                                                echo "$NODE_PATH"
-                                                exit 0
-                                            fi
-                                        fi
-                                    done
-                                done
+                                # /home/ubuntu/.nvm 확인 (가장 가능성 높음)
+                                if [ -s "/home/ubuntu/.nvm/nvm.sh" ]; then
+                                    export NVM_DIR="/home/ubuntu/.nvm"
+                                    . "$NVM_DIR/nvm.sh"
+                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                    which node 2>/dev/null && exit 0
+                                fi
+                                
+                                # /var/lib/jenkins/.nvm 확인
+                                if [ -s "/var/lib/jenkins/.nvm/nvm.sh" ]; then
+                                    export NVM_DIR="/var/lib/jenkins/.nvm"
+                                    . "$NVM_DIR/nvm.sh"
+                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                    which node 2>/dev/null && exit 0
+                                fi
+                                
+                                # 현재 사용자 홈 디렉토리 확인
+                                if [ -s "$HOME/.nvm/nvm.sh" ]; then
+                                    export NVM_DIR="$HOME/.nvm"
+                                    . "$NVM_DIR/nvm.sh"
+                                    nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                    which node 2>/dev/null && exit 0
+                                fi
+                                
                                 echo ""
                             ''', returnStdout: true).trim()
                             
                             if (nvmCheck) {
                                 nodePath = nvmCheck
+                                echo "✅ nvm에서 Node.js 찾음: ${nodePath}"
+                                
                                 // npm 경로도 같은 방식으로 찾기
                                 npmPath = sh(script: '''
-                                    for nvm_user in ubuntu jenkins ec2-user root; do
-                                        for nvm_home in /home/$nvm_user /var/lib/jenkins ~; do
-                                            NVM_DIR="$nvm_home/.nvm"
-                                            if [ -s "$NVM_DIR/nvm.sh" ]; then
-                                                export NVM_DIR
-                                                . "$NVM_DIR/nvm.sh"
-                                                nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
-                                                NPM_PATH=$(which npm 2>/dev/null)
-                                                if [ -n "$NPM_PATH" ]; then
-                                                    echo "$NPM_PATH"
-                                                    exit 0
-                                                fi
-                                            fi
-                                        done
-                                    done
+                                    # /home/ubuntu/.nvm 확인
+                                    if [ -s "/home/ubuntu/.nvm/nvm.sh" ]; then
+                                        export NVM_DIR="/home/ubuntu/.nvm"
+                                        . "$NVM_DIR/nvm.sh"
+                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                        which npm 2>/dev/null && exit 0
+                                    fi
+                                    
+                                    # /var/lib/jenkins/.nvm 확인
+                                    if [ -s "/var/lib/jenkins/.nvm/nvm.sh" ]; then
+                                        export NVM_DIR="/var/lib/jenkins/.nvm"
+                                        . "$NVM_DIR/nvm.sh"
+                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                        which npm 2>/dev/null && exit 0
+                                    fi
+                                    
+                                    # 현재 사용자 홈 디렉토리 확인
+                                    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+                                        export NVM_DIR="$HOME/.nvm"
+                                        . "$NVM_DIR/nvm.sh"
+                                        nvm use default 2>/dev/null || nvm use 20 2>/dev/null || nvm use node 2>/dev/null || true
+                                        which npm 2>/dev/null && exit 0
+                                    fi
+                                    
                                     echo ""
                                 ''', returnStdout: true).trim()
+                                
+                                if (npmPath) {
+                                    echo "✅ nvm에서 npm 찾음: ${npmPath}"
+                                }
                             }
                         }
                         
