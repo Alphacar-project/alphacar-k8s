@@ -126,31 +126,27 @@ pipeline {
                         }
                         withSonarQubeEnv('sonarqube') {
                             script {
-                                // SonarQube 토큰이 환경 변수로 자동 주입됨 (withSonarQubeEnv가 처리)
-                                def sonarToken = env.SONAR_TOKEN ?: env.SONAR_AUTH_TOKEN ?: ''
-                                
+                                // SonarQube 토큰과 호스트 URL이 환경 변수로 자동 주입됨 (withSonarQubeEnv가 처리)
                                 sh """
                                     echo "🔍 SonarQube 스캔 시작..."
                                     echo "📊 커버리지 리포트 경로 확인:"
                                     ls -la coverage/lcov.info 2>/dev/null || echo "⚠️ coverage/lcov.info 파일이 없습니다"
-                                    
-                                    echo "🌐 SonarQube 서버 연결 테스트..."
-                                    curl -f -s http://sonarqube-service.jenkins.svc.cluster.local:9000/api/system/status || echo "⚠️ SonarQube 서버 연결 실패"
-                                    
+
                                     echo "🔑 SonarQube 인증 정보 확인 중..."
                                     if [ -n "\${SONAR_TOKEN}" ]; then
                                         echo "✅ SonarQube 토큰이 설정되어 있습니다"
                                     else
                                         echo "⚠️ SonarQube 토큰이 환경 변수에 없습니다"
                                     fi
-                                    
+
+                                    echo "🌐 SonarQube 호스트 URL: \${SONAR_HOST_URL:-not set}"
+
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
                                         -Dsonar.sources=app,components,lib \\
-                                        -Dsonar.host.url=http://sonarqube-service.jenkins.svc.cluster.local:9000 \\
                                         -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                                         -Dsonar.sourceEncoding=UTF-8
-                                    
+
                                     if [ \$? -eq 0 ]; then
                                         echo "✅ SonarQube 스캔 성공!"
                                     else
