@@ -181,7 +181,7 @@ pipeline {
                                     # baseline-browser-mapping 경고 메시지 필터링 (빌드에는 영향 없음)
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
-                                        -Dsonar.sources=\lib \\
+                                        -Dsonar.sources=lib \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.exclusions=**/*.css,**/*.test.*,**/*.spec.*,**/__tests__/**,**/node_modules/**,**/.next/** \\
                                         -Dsonar.coverage.exclusions=**/app/**,**/components/**,**/pages/**,**/*.test.*,**/*.spec.*,**/__tests__/** \\
