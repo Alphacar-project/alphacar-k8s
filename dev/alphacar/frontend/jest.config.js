@@ -14,15 +14,13 @@ const customJestConfig = {
   },
   // __tests__ 디렉토리의 파일만 테스트
   testMatch: [
-    '**/__tests__/**/*.[jt]s?(x)',
+    '<rootDir>/__tests__/**/*.[jt]s?(x)',
   ],
-  // 테스트 파일 무시 패턴 (더 명확하게)
+  // 테스트 파일 무시 패턴
   testPathIgnorePatterns: [
     '/node_modules/',
     '/.next/',
     '/coverage/',
-    '/lib/api.test.ts',
-    '/utils/price.test.ts',
   ],
 }
 
@@ -34,7 +32,7 @@ module.exports = {
   ...jestConfig,
   // 커버리지 수집 활성화
   collectCoverage: true,
-  // 커버리지 수집 대상 (lib만 포함, utils는 파일이 없으므로 제외)
+  // 커버리지 수집 대상 (lib만 포함)
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
     '!**/*.d.ts',
