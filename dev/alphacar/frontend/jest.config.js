@@ -11,10 +11,9 @@ const customJestConfig = {
     '^@/(.*)$': '<rootDir>/$1',
   },
   
-  // 테스트 파일 찾기 (명확하게)
+  // 테스트 파일 찾기 (__tests__ 디렉토리만)
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',
-    '**/?(*.)+(test).[tj]s?(x)',
   ],
   
   testPathIgnorePatterns: [
@@ -59,4 +58,7 @@ module.exports = {
   // 테스트 매칭 설정
   testMatch: customJestConfig.testMatch,
   testPathIgnorePatterns: customJestConfig.testPathIgnorePatterns,
+  // 🔥 TypeScript 변환 설정 유지 (nextJest의 transform 필수!)
+  transform: jestConfig.transform,
+  transformIgnorePatterns: jestConfig.transformIgnorePatterns,
 }
