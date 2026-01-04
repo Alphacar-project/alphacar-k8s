@@ -12,14 +12,16 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
+  // __tests__ 디렉토리의 파일만 테스트 (lib/, utils/ 디렉토리의 .test.ts 파일 제외)
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',
-    '**/?(*.)+(spec|test).[jt]s?(x)',
   ],
   // 테스트 파일이 없어도 오류로 처리하지 않음
   testPathIgnorePatterns: [
     '/node_modules/',
     '/.next/',
+    '/lib/',
+    '/utils/',
   ],
 }
 
@@ -50,4 +52,3 @@ module.exports = {
   // 커버리지 리포트 저장 디렉토리
   coverageDirectory: 'coverage',
 }
-

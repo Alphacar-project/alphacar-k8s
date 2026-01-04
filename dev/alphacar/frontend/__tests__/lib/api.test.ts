@@ -6,7 +6,7 @@
 import api, { fetchMainData, fetchBrands, fetchBrandsWithLogo } from '../../lib/api';
 
 describe('API Utilities', () => {
-  let mockGet: jest.SpyInstance;
+  let mockGet;
 
   beforeEach(() => {
     jest.clearAllMocks();
