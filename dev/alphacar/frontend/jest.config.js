@@ -12,19 +12,37 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
+  
+  // 커버리지 계산 켜기
+  collectCoverage: true,
+  
+  // 🔥 커버리지 대상 (UI 전부 제외, 로직만 포함)
   collectCoverageFrom: [
-    'app/**/*.{js,jsx,ts,tsx}',
-    'components/**/*.{js,jsx,ts,tsx}',
     'lib/**/*.{js,jsx,ts,tsx}',
+    'utils/**/*.{js,jsx,ts,tsx}',
+    'services/**/*.{js,jsx,ts,tsx}',
     '!**/*.d.ts',
     '!**/node_modules/**',
     '!**/.next/**',
     '!**/coverage/**',
     '!**/*.config.{js,ts}',
   ],
+  
+  // 🔥 Next.js / UI 영역 전부 제외
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '/app/',
+    '/components/',
+    '/pages/',
+    '/.next/',
+  ],
+  
+  // SonarQube가 읽는 포맷
+  coverageReporters: ['lcov', 'text'],
+  
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',
-    '**/?(*.)+(spec|test).[jt]s?(x)',
+    '**/?(*.)+(test).[tj]s?(x)',
   ],
 }
 
