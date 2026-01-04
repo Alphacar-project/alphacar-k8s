@@ -254,7 +254,7 @@ pipeline {
                                         
                                         # SonarQube 스캔 로그에서 커버리지 관련 메시지 확인
                                         echo "📋 SonarQube 스캔 로그 (커버리지 관련):"
-                                        grep -i "coverage\|lcov" /tmp/sonar-scan.log | tail -20 || echo "⚠️ 커버리지 관련 로그가 없습니다"
+                                        grep -iE "coverage|lcov" /tmp/sonar-scan.log | tail -20 || echo "⚠️ 커버리지 관련 로그가 없습니다"
                                         
                                         grep -v "baseline-browser-mapping" /tmp/sonar-scan.log || true
                                     else
