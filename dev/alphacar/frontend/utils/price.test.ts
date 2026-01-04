@@ -14,7 +14,8 @@ describe('price utils', () => {
 
     it('잘못된 입력값 처리', () => {
       expect(formatPrice(NaN)).toBe('0원');
-      expect(formatPrice(Infinity)).toBe('Infinity원');
+      // Infinity는 toLocaleString으로 포맷팅되면 "∞원"이 됨
+      expect(formatPrice(Infinity)).toBe('∞원');
     });
   });
 
