@@ -37,8 +37,7 @@ pipeline {
                     
                     echo "🔍 변경된 파일 확인 중..."
                     
-                    // [skip ci] 커밋 체크
-                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    // [skip ci] 커밋 체크 (commitMessage는 이미 위에서 선언됨)
                     echo "커밋 메시지: ${commitMessage}"
                     
                     if (commitMessage.contains('[skip ci]')) {
