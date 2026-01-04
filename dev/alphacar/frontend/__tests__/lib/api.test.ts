@@ -3,7 +3,6 @@
  * SonarQube 커버리지 향상을 위한 테스트
  */
 
-import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import api, { fetchMainData, fetchBrands, fetchBrandsWithLogo } from '../../lib/api';
 
 describe('API Utilities', () => {
@@ -93,7 +92,6 @@ describe('API Utilities', () => {
       const result = await fetchBrands();
       
       expect(result).toEqual(mockBrands);
-      // params가 없으면 undefined가 아니라 아예 전달되지 않을 수 있음
       expect(mockGet).toHaveBeenCalled();
       const calls = mockGet.mock.calls;
       expect(calls[0][0]).toBe('/api/brands');
@@ -112,7 +110,6 @@ describe('API Utilities', () => {
       const result = await fetchBrandsWithLogo();
       
       expect(result).toEqual(mockBrands);
-      // params가 없으면 undefined가 아니라 아예 전달되지 않을 수 있음
       expect(mockGet).toHaveBeenCalled();
       const calls = mockGet.mock.calls;
       expect(calls[0][0]).toBe('/api/brands');

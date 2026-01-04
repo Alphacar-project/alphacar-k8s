@@ -16,6 +16,11 @@ const customJestConfig = {
     '**/__tests__/**/*.[jt]s?(x)',
     '**/?(*.)+(spec|test).[jt]s?(x)',
   ],
+  // 테스트 파일이 없어도 오류로 처리하지 않음
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/.next/',
+  ],
 }
 
 // createJestConfig는 이렇게 내보내집니다
