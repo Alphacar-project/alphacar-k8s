@@ -4,25 +4,30 @@
  */
 
 // Mock 설정 (api.ts import 전에 설정해야 함)
-const mockAxiosInstance = {
-  get: jest.fn(),
-  post: jest.fn(),
-  interceptors: {
-    request: { use: jest.fn() },
-    response: { use: jest.fn() },
-  },
-  defaults: {
-    baseURL: '',
-    headers: { 'Content-Type': 'application/json' },
-  },
-};
-
-jest.mock('axios', () => ({
-  create: jest.fn(() => mockAxiosInstance),
-  default: {
+// jest.mock은 hoisting되므로 내부에서 직접 객체 생성
+jest.mock('axios', () => {
+  const mockAxiosInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    interceptors: {
+      request: { use: jest.fn() },
+      response: { use: jest.fn() },
+    },
+    defaults: {
+      baseURL: '',
+      headers: { 'Content-Type': 'application/json' },
+    },
+  };
+  
+  return {
     create: jest.fn(() => mockAxiosInstance),
-  },
-}));
+    default: {
+      create: jest.fn(() => mockAxiosInstance),
+    },
+    // 테스트에서 사용할 수 있도록 export
+    __mockAxiosInstance: mockAxiosInstance,
+  };
+});
 
 jest.mock('js-cookie', () => ({
   get: jest.fn(),
@@ -30,6 +35,10 @@ jest.mock('js-cookie', () => ({
 
 // api.ts를 mock 설정 후에 import
 import { fetchMainData, fetchBrands, fetchQuoteInitData, saveQuote } from './api';
+import axios from 'axios';
+
+// mock 인스턴스 가져오기
+const mockAxiosInstance = (axios as any).__mockAxiosInstance;
 
 describe('lib/api', () => {
   beforeEach(() => {
