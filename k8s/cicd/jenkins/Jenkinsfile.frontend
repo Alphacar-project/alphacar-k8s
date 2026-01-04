@@ -121,6 +121,18 @@ pipeline {
                         """
                         
                         // 커버리지 리포트 파일 확인
+                        sh """
+                            echo "📊 커버리지 리포트 디버깅 정보:"
+                            if [ -f coverage/lcov.info ]; then
+                                echo "✅ coverage/lcov.info 파일 존재"
+                                echo "📏 파일 크기: $(wc -c < coverage/lcov.info) bytes"
+                                head -20 coverage/lcov.info || echo "파일 읽기 실패"
+                            else
+                                echo "❌ coverage/lcov.info 파일이 없습니다"
+                            fi
+                            echo "🔍 lib 디렉토리: $(ls lib/ 2>/dev/null | wc -l) files"
+                            echo "🔍 utils 디렉토리: $(ls utils/ 2>/dev/null | wc -l) files"
+                        """
                         sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
                     }
                     
