@@ -12,15 +12,18 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  // __tests__ 디렉토리의 파일만 테스트
+  // __tests__ 디렉토리의 .test. 또는 .spec. 파일만 테스트
   testMatch: [
-    '<rootDir>/__tests__/**/*.[jt]s?(x)',
+    '<rootDir>/__tests__/**/*.test.[jt]s?(x)',
+    '<rootDir>/__tests__/**/*.spec.[jt]s?(x)',
   ],
   // 테스트 파일 무시 패턴
   testPathIgnorePatterns: [
     '/node_modules/',
     '/.next/',
     '/coverage/',
+    '/lib/',
+    '/utils/',
   ],
   // TypeScript 파일 확장자 명시
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
@@ -35,7 +38,7 @@ module.exports = {
   ...jestConfig,
   // 커버리지 수집 활성화
   collectCoverage: true,
-  // 커버리지 수집 대상 (lib만 포함)
+  // 커버리지 수집 대상 (lib만 포함 - 실제 서비스 파일)
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
     '!**/*.d.ts',
