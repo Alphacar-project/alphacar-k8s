@@ -497,7 +497,7 @@ function HomePageContent() {
           <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "22px" }}>차종이나 모델명으로 검색할 수 있어요!!</p>
           <form onSubmit={handleSearchSubmit} style={{ display: "inline-flex", alignItems: "center", gap: "12px" }}>
             <div style={{ position: "relative", width: "720px", maxWidth: "90vw" }}>
-              <input type="text" placeholder="어떤 차를 찾으세요? " value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: "100%", height: "56px", padding: "0 22px", borderRadius: "999px", border: "1px solid #e5e7eb", fontSize: "17px", outline: "none" }} />
+              <input type="text" placeholder="고객님 어떤 차를 찾으세요? " value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: "100%", height: "56px", padding: "0 22px", borderRadius: "999px", border: "1px solid #e5e7eb", fontSize: "17px", outline: "none" }} />
             </div>
             <button type="submit" style={{ width: "54px", height: "54px", borderRadius: "50%", border: "none", backgroundColor: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="white" strokeWidth="2.5" /><line x1="16.5" y1="16.5" x2="21" y2="21" stroke="white" strokeWidth="2.5" strokeLinecap="round" /></svg>
