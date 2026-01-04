@@ -23,10 +23,6 @@ const customJestConfig = {
   ],
   
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
-  transformIgnorePatterns: [
-    '/node_modules/',
-    '^.+\\.module\\.(css|sass|scss)$',
-  ],
   
   // 🔥 커버리지 설정 (명시적으로 강제)
   collectCoverage: true,
@@ -60,5 +56,5 @@ module.exports = {
   testPathIgnorePatterns: customJestConfig.testPathIgnorePatterns,
   // 🔥 TypeScript 변환 설정 유지 (nextJest의 transform 필수!)
   transform: jestConfig.transform,
-  transformIgnorePatterns: jestConfig.transformIgnorePatterns,
+  // transformIgnorePatterns는 nextJest가 자동으로 설정하므로 제거
 }
