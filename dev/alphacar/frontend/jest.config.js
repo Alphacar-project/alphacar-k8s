@@ -12,11 +12,9 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  
-  // 커버리지 계산 켜기 (명시적으로 설정)
+  // 커버리지 수집 활성화
   collectCoverage: true,
-  
-  // 🔥 커버리지 대상 (UI 전부 제외, 로직만 포함)
+  // 커버리지 수집 대상 (lib, utils, services만 포함)
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
     'utils/**/*.{js,jsx,ts,tsx}',
@@ -27,37 +25,24 @@ const customJestConfig = {
     '!**/coverage/**',
     '!**/*.config.{js,ts}',
   ],
-  
-  // 🔥 Next.js / UI 영역 전부 제외
+  // 커버리지에서 제외할 경로 (app, components, pages 제외)
   coveragePathIgnorePatterns: [
     '/node_modules/',
+    '/.next/',
+    '/coverage/',
     '/app/',
     '/components/',
     '/pages/',
-    '/.next/',
   ],
-  
-  // SonarQube가 읽는 포맷 (lcov 필수)
+  // 커버리지 리포트 형식
   coverageReporters: ['lcov', 'text', 'json'],
-  
-  // 커버리지 디렉토리 명시
+  // 커버리지 리포트 저장 디렉토리
   coverageDirectory: 'coverage',
-  
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',
-    '**/?(*.)+(test).[tj]s?(x)',
+    '**/?(*.)+(spec|test).[jt]s?(x)',
   ],
 }
 
-// createJestConfig로 기본 설정 생성
-const jestConfig = createJestConfig(customJestConfig)
-
-// 커버리지 설정이 제대로 적용되도록 보장 (nextJest가 덮어쓰지 않도록)
-module.exports = {
-  ...jestConfig,
-  collectCoverage: true,
-  collectCoverageFrom: customJestConfig.collectCoverageFrom,
-  coverageReporters: customJestConfig.coverageReporters,
-  coverageDirectory: customJestConfig.coverageDirectory,
-  coveragePathIgnorePatterns: customJestConfig.coveragePathIgnorePatterns,
-}
+// createJestConfig는 이렇게 내보내집니다
+module.exports = createJestConfig(customJestConfig)
