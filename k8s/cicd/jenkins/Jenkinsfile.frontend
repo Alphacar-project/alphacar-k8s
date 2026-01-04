@@ -175,6 +175,8 @@ pipeline {
                                     
                                     # SonarQube 스캔 실행 (커버리지 리포트 포함)
                                     # 커버리지 리포트가 있으면 포함, 없으면 제외
+                                    SCAN_EXIT_CODE=0
+                                    
                                     if [ -f "coverage/lcov.info" ]; then
                                         echo "📊 커버리지 리포트를 포함하여 스캔합니다."
                                         sonar-scanner \\
@@ -186,7 +188,8 @@ pipeline {
                                             -Dsonar.javascript.analyzer.maxFileSize=500 \\
                                             -Dsonar.token=\${SONAR_TOKEN} \\
                                             -Dsonar.host.url=\${SONAR_HOST_URL} \\
-                                            2>&1 | grep -v "baseline-browser-mapping" | tee /tmp/sonar-scan.log
+                                            > /tmp/sonar-scan.log 2>&1 || SCAN_EXIT_CODE=\$?
+                                        grep -v "baseline-browser-mapping" /tmp/sonar-scan.log || true
                                     else
                                         echo "⚠️ 커버리지 리포트가 없습니다. 커버리지 없이 스캔합니다."
                                         sonar-scanner \\
@@ -197,11 +200,11 @@ pipeline {
                                             -Dsonar.javascript.analyzer.maxFileSize=500 \\
                                             -Dsonar.token=\${SONAR_TOKEN} \\
                                             -Dsonar.host.url=\${SONAR_HOST_URL} \\
-                                            2>&1 | grep -v "baseline-browser-mapping" | tee /tmp/sonar-scan.log
+                                            > /tmp/sonar-scan.log 2>&1 || SCAN_EXIT_CODE=\$?
+                                        grep -v "baseline-browser-mapping" /tmp/sonar-scan.log || true
                                     fi
                                     
                                     # sonar-scanner의 실제 exit code 확인 (report-task.txt 파일 존재 여부로 판단)
-                                    SCAN_EXIT_CODE=\$?
                                     if [ -f ".scannerwork/report-task.txt" ] && [ \$SCAN_EXIT_CODE -eq 0 ]; then
                                         echo "✅ SonarQube 스캔 성공!"
                                     else
