@@ -15,6 +15,11 @@ const customJestConfig = {
     '<rootDir>/__tests__/**/*.test.[jt]s?(x)',
     '<rootDir>/__tests__/**/*.spec.[jt]s?(x)',
   ],
+  // testMatch 대신 testRegex 사용하여 더 엄격한 패턴 적용
+  testRegex: [
+    '/__tests__/.*\\.test\\.[jt]sx?$',
+    '/__tests__/.*\\.spec\\.[jt]sx?$',
+  ],
   // 존재하지 않는 파일 발견 방지 (강화된 무시 패턴)
   testPathIgnorePatterns: [
     '/node_modules/',
@@ -34,6 +39,8 @@ const customJestConfig = {
     '/node_modules/',
     '^.+\\.module\\.(css|sass|scss)$',
   ],
+  // findRelatedTests 비활성화 (존재하지 않는 파일 찾기 방지)
+  findRelatedTests: false,
 }
 
 const jestConfig = createJestConfig(customJestConfig)
