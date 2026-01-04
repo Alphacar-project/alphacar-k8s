@@ -22,9 +22,7 @@ const customJestConfig = {
     '/coverage/',
   ],
   
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
-  
-  // 🔥 커버리지 설정 (명시적으로 강제)
+  // 🔥 커버리지 설정
   collectCoverage: true,
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
@@ -41,20 +39,16 @@ const customJestConfig = {
   coverageDirectory: 'coverage',
 }
 
+// nextJest가 모든 설정을 처리하도록 함 (transform 포함)
 const jestConfig = createJestConfig(customJestConfig)
 
-// 🔥 nextJest가 커버리지 설정을 덮어쓰지 않도록 명시적으로 적용
+// 커버리지 설정만 명시적으로 덮어쓰기 (transform은 nextJest가 처리)
 module.exports = {
   ...jestConfig,
-  // 커버리지 설정 강제 적용
   collectCoverage: true,
   collectCoverageFrom: customJestConfig.collectCoverageFrom,
   coverageReporters: customJestConfig.coverageReporters,
   coverageDirectory: customJestConfig.coverageDirectory,
-  // 테스트 매칭 설정
   testMatch: customJestConfig.testMatch,
   testPathIgnorePatterns: customJestConfig.testPathIgnorePatterns,
-  // 🔥 TypeScript 변환 설정 유지 (nextJest의 transform 필수!)
-  transform: jestConfig.transform,
-  // transformIgnorePatterns는 nextJest가 자동으로 설정하므로 제거
 }
