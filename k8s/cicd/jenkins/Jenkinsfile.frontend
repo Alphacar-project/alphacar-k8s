@@ -21,6 +21,20 @@ pipeline {
                     cleanWs()
                     checkout scm
                     
+                    // 디버깅: 현재 체크아웃된 커밋 정보 출력
+                    def currentCommit = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    def currentCommitShort = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def currentBranch = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    
+                    echo "=========================================="
+                    echo "📋 Git 정보 확인"
+                    echo "브랜치: ${currentBranch}"
+                    echo "커밋 해시 (전체): ${currentCommit}"
+                    echo "커밋 해시 (짧은): ${currentCommitShort}"
+                    echo "커밋 메시지: ${commitMessage}"
+                    echo "=========================================="
+                    
                     echo "🔍 변경된 파일 확인 중..."
                     
                     // [skip ci] 커밋 체크
