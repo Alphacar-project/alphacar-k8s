@@ -224,10 +224,10 @@ pipeline {
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
                             // Docker 빌드 캐시 활용 (빌드 시간 단축)
-                            // BuildKit 사용으로 더 빠른 빌드
+                            // 일반 docker build 사용 (BuildKit 제거)
                             // --pull 제거하여 캐시된 베이스 이미지 사용
                             sh """
-                                DOCKER_BUILDKIT=1 docker build \\
+                                docker build \\
                                     -f Dockerfile \\
                                     -t ${imageFullTag} \\
                                     --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
