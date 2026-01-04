@@ -165,12 +165,9 @@ pipeline {
 
                                     echo "🌐 SonarQube 호스트 URL: \${SONAR_HOST_URL:-not set}"
                                     
-                                    if [ -z "\${SONAR_HOST_URL}" ]; then
-                                        echo "❌ SonarQube 호스트 URL이 설정되지 않았습니다"
-                                        exit 1
-                                    fi
-
-                                    # sonar-project.properties 파일에서 host.url 제거 확인
+                                    # 실제 서비스 파일만 포함 (lib/api.ts)
+                                    SOURCES="lib"
+                                    echo "📁 분석할 소스 디렉토리: ${SOURCES} (실제 서비스 파일만)"
                                     if grep -q "^sonar.host.url=" sonar-project.properties 2>/dev/null; then
                                         echo "⚠️ sonar-project.properties에 sonar.host.url이 설정되어 있습니다. 주석 처리하세요."
                                         sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
@@ -179,11 +176,6 @@ pipeline {
                                     echo "🚀 SonarQube 빠른 스캔 시작..."
                                     
                                     # 실제 존재하는 소스 디렉토리 확인
-                                    SOURCES="app"
-                                    [ -d "components" ] && SOURCES="\${SOURCES},components"
-                                    [ -d "lib" ] && SOURCES="\${SOURCES},lib"
-                                    [ -d "pages" ] && SOURCES="\${SOURCES},pages"
-                                    echo "📁 분석할 소스 디렉토리: \${SOURCES}"
                                     
                                     # 빠른 스캔을 위한 최적화된 설정
                                     # baseline-browser-mapping 경고 메시지 필터링 (빌드에는 영향 없음)
