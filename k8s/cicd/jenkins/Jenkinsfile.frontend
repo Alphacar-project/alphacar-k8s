@@ -183,7 +183,6 @@ pipeline {
                                     [ -d "components" ] && SOURCES="\${SOURCES},components"
                                     [ -d "lib" ] && SOURCES="\${SOURCES},lib"
                                     [ -d "pages" ] && SOURCES="\${SOURCES},pages"
-                                    [ -d "utils" ] && SOURCES="\${SOURCES},utils"
                                     echo "📁 분석할 소스 디렉토리: \${SOURCES}"
                                     
                                     # 빠른 스캔을 위한 최적화된 설정
