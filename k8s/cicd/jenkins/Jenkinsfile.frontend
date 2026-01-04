@@ -27,24 +27,51 @@ pipeline {
                         USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
                         echo "💾 디스크 사용률: \${USAGE}%"
                         
-                        # 디스크 사용률이 70% 이상이면 자동으로 Docker 리소스 정리
-                        if [ \${USAGE} -gt 70 ]; then
-                            echo "⚠️ 경고: 디스크 사용률이 \${USAGE}%입니다. Docker 리소스 자동 정리 중..."
+                        # 디스크 사용률이 60% 이상이면 자동으로 정리 시작
+                        if [ \${USAGE} -gt 60 ]; then
+                            echo "⚠️ 경고: 디스크 사용률이 \${USAGE}%입니다. 리소스 자동 정리 시작..."
+                            
+                            # 1. Docker 리소스 정리
+                            echo "🧹 Docker 리소스 정리 중..."
                             docker system prune -a -f --volumes || true
                             docker builder prune -a -f || true
-                            echo "✅ Docker 리소스 정리 완료. 디스크 사용량 재확인:"
-                            df -h
-                        fi
-                        
-                        # 여전히 디스크 공간이 부족하면 추가 정리
-                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
-                        if [ \${USAGE} -gt 85 ]; then
-                            echo "⚠️ 심각: 디스크 사용률이 여전히 \${USAGE}%입니다. 추가 정리 중..."
-                            # Docker 이미지 강제 정리
                             docker image prune -a -f || true
                             docker container prune -f || true
                             docker volume prune -f || true
-                            echo "✅ 추가 정리 완료. 디스크 사용량 최종 확인:"
+                            docker network prune -f || true
+                            
+                            # 2. 오래된 Jenkins 워크스페이스 정리 (7일 이상 된 것)
+                            echo "🧹 오래된 워크스페이스 정리 중..."
+                            find /var/lib/jenkins/workspace -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+                            
+                            # 3. 임시 파일 정리
+                            echo "🧹 임시 파일 정리 중..."
+                            find /tmp -type f -mtime +3 -delete 2>/dev/null || true
+                            find /var/tmp -type f -mtime +3 -delete 2>/dev/null || true
+                            
+                            # 4. 로그 파일 정리 (100MB 이상인 로그 파일)
+                            echo "🧹 큰 로그 파일 정리 중..."
+                            find /var/log -type f -size +100M -delete 2>/dev/null || true
+                            
+                            echo "✅ 정리 완료. 디스크 사용량 재확인:"
+                            df -h
+                        fi
+                        
+                        # 여전히 디스크 공간이 부족하면 강제 정리
+                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+                        if [ \${USAGE} -gt 80 ]; then
+                            echo "⚠️ 심각: 디스크 사용률이 여전히 \${USAGE}%입니다. 강제 정리 중..."
+                            
+                            # 모든 중지된 컨테이너 강제 삭제
+                            docker ps -aq --filter "status=exited" | xargs -r docker rm -f || true
+                            
+                            # 사용하지 않는 이미지 강제 삭제
+                            docker images -q --filter "dangling=true" | xargs -r docker rmi -f || true
+                            
+                            # 3일 이상 된 워크스페이스 정리
+                            find /var/lib/jenkins/workspace -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+                            
+                            echo "✅ 강제 정리 완료. 디스크 사용량 최종 확인:"
                             df -h
                         fi
                     """
