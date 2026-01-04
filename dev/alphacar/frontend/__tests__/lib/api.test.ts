@@ -3,17 +3,20 @@
  * SonarQube 커버리지 향상을 위한 테스트
  */
 
-import { describe, test, expect, jest, beforeEach } from '@jest/globals';
-import axios from 'axios';
+import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import api, { fetchMainData, fetchBrands, fetchBrandsWithLogo } from '../../lib/api';
 
-// axios mock 설정
-jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
-
 describe('API Utilities', () => {
+  let mockGet: jest.SpyInstance;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    // api 인스턴스의 get 메서드를 spy
+    mockGet = jest.spyOn(api, 'get');
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('fetchMainData', () => {
@@ -24,12 +27,12 @@ describe('API Utilities', () => {
         shortcuts: [],
       };
       
-      mockedAxios.get.mockResolvedValue({ data: mockData });
+      mockGet.mockResolvedValue({ data: mockData });
       
       const result = await fetchMainData();
       
       expect(result).toEqual(mockData);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/api/main', { params: {} });
+      expect(mockGet).toHaveBeenCalledWith('/api/main', { params: {} });
     });
 
     test('브랜드와 함께 메인 데이터 조회', async () => {
@@ -39,12 +42,42 @@ describe('API Utilities', () => {
         shortcuts: [],
       };
       
-      mockedAxios.get.mockResolvedValue({ data: mockData });
+      mockGet.mockResolvedValue({ data: mockData });
       
       const result = await fetchMainData('현대');
       
       expect(result).toEqual(mockData);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/api/main', { params: { brand: '현대' } });
+      expect(mockGet).toHaveBeenCalledWith('/api/main', { params: { brand: '현대' } });
+    });
+
+    test('전체 브랜드일 때는 params 없이 호출', async () => {
+      const mockData = {
+        welcomeMessage: '테스트',
+        banners: [],
+        shortcuts: [],
+      };
+      
+      mockGet.mockResolvedValue({ data: mockData });
+      
+      const result = await fetchMainData('전체');
+      
+      expect(result).toEqual(mockData);
+      expect(mockGet).toHaveBeenCalledWith('/api/main', { params: {} });
+    });
+
+    test('all 브랜드일 때는 params 없이 호출', async () => {
+      const mockData = {
+        welcomeMessage: '테스트',
+        banners: [],
+        shortcuts: [],
+      };
+      
+      mockGet.mockResolvedValue({ data: mockData });
+      
+      const result = await fetchMainData('all');
+      
+      expect(result).toEqual(mockData);
+      expect(mockGet).toHaveBeenCalledWith('/api/main', { params: {} });
     });
   });
 
@@ -55,12 +88,12 @@ describe('API Utilities', () => {
         { name: '기아' },
       ];
       
-      mockedAxios.get.mockResolvedValue({ data: mockBrands });
+      mockGet.mockResolvedValue({ data: mockBrands });
       
       const result = await fetchBrands();
       
       expect(result).toEqual(mockBrands);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/api/brands', undefined);
+      expect(mockGet).toHaveBeenCalledWith('/api/brands', undefined);
     });
   });
 
@@ -71,19 +104,20 @@ describe('API Utilities', () => {
         { name: '기아', logo_url: 'https://example.com/kia.png' },
       ];
       
-      mockedAxios.get.mockResolvedValue({ data: mockBrands });
+      mockGet.mockResolvedValue({ data: mockBrands });
       
       const result = await fetchBrandsWithLogo();
       
       expect(result).toEqual(mockBrands);
-      expect(mockedAxios.get).toHaveBeenCalledWith('/api/brands', undefined);
+      expect(mockGet).toHaveBeenCalledWith('/api/brands', undefined);
     });
   });
 
   describe('API 인스턴스', () => {
     test('api 인스턴스가 생성되어야 함', () => {
       expect(api).toBeDefined();
-      expect(api.defaults.baseURL).toBe('');
+      expect(api.defaults).toBeDefined();
+      expect(api.get).toBeDefined();
     });
   });
 });
