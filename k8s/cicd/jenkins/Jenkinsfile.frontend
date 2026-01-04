@@ -184,6 +184,7 @@ pipeline {
                                         -Dsonar.coverage.exclusions=**/app/**,**/components/**,**/pages/**,**/*.test.*,**/*.spec.*,**/__tests__/** \\
                                         -Dsonar.cpd.exclusions=**/* \\
                                         -Dsonar.javascript.analyzer.maxFileSize=500 \\
+                                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
                                         -Dsonar.host.url=\${SONAR_HOST_URL} \\
                                         2>&1 | grep -v "baseline-browser-mapping" | tee /tmp/sonar-scan.log || true
