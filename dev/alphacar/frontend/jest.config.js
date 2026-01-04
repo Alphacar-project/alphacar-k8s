@@ -13,7 +13,7 @@ const customJestConfig = {
     '^@/(.*)$': '<rootDir>/$1',
   },
   
-  // 커버리지 계산 켜기
+  // 커버리지 계산 켜기 (명시적으로 설정)
   collectCoverage: true,
   
   // 🔥 커버리지 대상 (UI 전부 제외, 로직만 포함)
@@ -37,8 +37,11 @@ const customJestConfig = {
     '/.next/',
   ],
   
-  // SonarQube가 읽는 포맷
-  coverageReporters: ['lcov', 'text'],
+  // SonarQube가 읽는 포맷 (lcov 필수)
+  coverageReporters: ['lcov', 'text', 'json'],
+  
+  // 커버리지 디렉토리 명시
+  coverageDirectory: 'coverage',
   
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',
@@ -46,5 +49,15 @@ const customJestConfig = {
   ],
 }
 
-// createJestConfig는 이렇게 내보내집니다
-module.exports = createJestConfig(customJestConfig)
+// createJestConfig로 기본 설정 생성
+const jestConfig = createJestConfig(customJestConfig)
+
+// 커버리지 설정이 제대로 적용되도록 보장 (nextJest가 덮어쓰지 않도록)
+module.exports = {
+  ...jestConfig,
+  collectCoverage: true,
+  collectCoverageFrom: customJestConfig.collectCoverageFrom,
+  coverageReporters: customJestConfig.coverageReporters,
+  coverageDirectory: customJestConfig.coverageDirectory,
+  coveragePathIgnorePatterns: customJestConfig.coveragePathIgnorePatterns,
+}
