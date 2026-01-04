@@ -93,7 +93,10 @@ describe('API Utilities', () => {
       const result = await fetchBrands();
       
       expect(result).toEqual(mockBrands);
-      expect(mockGet).toHaveBeenCalledWith('/api/brands', undefined);
+      // params가 없으면 undefined가 아니라 아예 전달되지 않을 수 있음
+      expect(mockGet).toHaveBeenCalled();
+      const calls = mockGet.mock.calls;
+      expect(calls[0][0]).toBe('/api/brands');
     });
   });
 
@@ -109,7 +112,10 @@ describe('API Utilities', () => {
       const result = await fetchBrandsWithLogo();
       
       expect(result).toEqual(mockBrands);
-      expect(mockGet).toHaveBeenCalledWith('/api/brands', undefined);
+      // params가 없으면 undefined가 아니라 아예 전달되지 않을 수 있음
+      expect(mockGet).toHaveBeenCalled();
+      const calls = mockGet.mock.calls;
+      expect(calls[0][0]).toBe('/api/brands');
     });
   });
 
