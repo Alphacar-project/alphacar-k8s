@@ -231,16 +231,31 @@ pipeline {
                                     
                                     if [ -f "coverage/lcov.info" ]; then
                                         echo "📊 커버리지 리포트를 포함하여 스캔합니다."
+                                        
+                                        # 절대 경로로 변환
+                                        COVERAGE_PATH=\$(pwd)/coverage/lcov.info
+                                        echo "📄 커버리지 리포트 절대 경로: \${COVERAGE_PATH}"
+                                        echo "📄 파일 존재 확인: \$(ls -lh \${COVERAGE_PATH} 2>&1)"
+                                        
+                                        # 커버리지 리포트 내용 확인 (lib과 utils 관련 라인만)
+                                        echo "📊 커버리지 리포트 내용 확인 (lib/utils 관련):"
+                                        grep -E "(lib/|utils/)" coverage/lcov.info | head -10 || echo "⚠️ lib/utils 관련 커버리지 데이터가 없습니다"
+                                        
                                         sonar-scanner \\
                                             -Dsonar.projectKey=alphacar-frontend \\
                                             -Dsonar.sources=\${SOURCES} \\
                                             -Dsonar.sourceEncoding=UTF-8 \\
                                             -Dsonar.exclusions=**/*.css,**/*.test.*,**/*.spec.*,**/__tests__/**,**/node_modules/**,**/.next/** \\
-                                            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                            -Dsonar.javascript.lcov.reportPaths=\${COVERAGE_PATH} \\
                                             -Dsonar.javascript.analyzer.maxFileSize=500 \\
                                             -Dsonar.token=\${SONAR_TOKEN} \\
                                             -Dsonar.host.url=\${SONAR_HOST_URL} \\
                                             > /tmp/sonar-scan.log 2>&1 || SCAN_EXIT_CODE=\$?
+                                        
+                                        # SonarQube 스캔 로그에서 커버리지 관련 메시지 확인
+                                        echo "📋 SonarQube 스캔 로그 (커버리지 관련):"
+                                        grep -i "coverage\|lcov" /tmp/sonar-scan.log | tail -20 || echo "⚠️ 커버리지 관련 로그가 없습니다"
+                                        
                                         grep -v "baseline-browser-mapping" /tmp/sonar-scan.log || true
                                     else
                                         echo "⚠️ 커버리지 리포트가 없습니다. 커버리지 없이 스캔합니다."
