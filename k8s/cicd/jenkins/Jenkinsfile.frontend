@@ -167,7 +167,7 @@ pipeline {
                                     
                                     # 실제 서비스 파일만 포함 (lib/api.ts)
                                     SOURCES="lib"
-                                    echo "📁 분석할 소스 디렉토리: ${SOURCES} (실제 서비스 파일만)"
+                                    echo "📁 분석할 소스 디렉토리: \${SOURCES} (실제 서비스 파일만)"
                                     if grep -q "^sonar.host.url=" sonar-project.properties 2>/dev/null; then
                                         echo "⚠️ sonar-project.properties에 sonar.host.url이 설정되어 있습니다. 주석 처리하세요."
                                         sed -i 's/^sonar.host.url=/#sonar.host.url=/' sonar-project.properties || true
