@@ -174,17 +174,30 @@ pipeline {
                     // 이미지 태그용 Git SHA 추출
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                     
-                    // 버전 정보 설정
-                    def baseVer = "1.0"
-                    def versionPath = 'dev/alphacar/frontend/version.txt'
+                    // 빌드 번호 관리 (build-number.txt 파일 사용)
+                    def buildNumberPath = 'dev/alphacar/frontend/build-number.txt'
+                    def buildNumber = 1
+                    
                     try {
-                        if (fileExists(versionPath)) {
-                            baseVer = readFile(versionPath).trim()
+                        if (fileExists(buildNumberPath)) {
+                            def buildNumberStr = readFile(buildNumberPath).trim()
+                            buildNumber = buildNumberStr.toInteger()
                         }
                     } catch (e) {
-                        echo "⚠️ version.txt 읽기 실패 → 1.0 사용"
+                        echo "⚠️ build-number.txt 읽기 실패 → 1부터 시작"
                     }
-                    env.FULL_VERSION = "${baseVer}.${currentBuild.number}-${env.GIT_SHA}"
+                    
+                    // 빌드 번호 증가
+                    buildNumber = buildNumber + 1
+                    
+                    // 증가된 빌드 번호를 파일에 저장
+                    dir('dev/alphacar/frontend') {
+                        writeFile file: 'build-number.txt', text: "${buildNumber}"
+                        sh "git add build-number.txt || true"
+                    }
+                    
+                    // 버전 형식: 1.{증가하는숫자}.0-{GIT_SHA}
+                    env.FULL_VERSION = "1.${buildNumber}.0-${env.GIT_SHA}"
                     echo "📦 빌드 버전: ${env.FULL_VERSION}"
                 }
                 // Docker 컨테이너에서 테스트 실행 및 SonarQube 분석
