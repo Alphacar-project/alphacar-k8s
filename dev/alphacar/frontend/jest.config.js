@@ -22,6 +22,16 @@ const customJestConfig = {
     '/coverage/',
   ],
   
+  // TypeScript 변환 설정 (명시적으로 설정)
+  preset: 'ts-jest',
+  transform: {
+    '^.+\\.(ts|tsx)$': ['ts-jest', {
+      tsconfig: {
+        jsx: 'react',
+      },
+    }],
+  },
+  
   // 🔥 커버리지 설정
   collectCoverage: true,
   collectCoverageFrom: [
@@ -39,10 +49,10 @@ const customJestConfig = {
   coverageDirectory: 'coverage',
 }
 
-// nextJest가 모든 설정을 처리하도록 함 (transform 포함)
+// nextJest 설정 생성
 const jestConfig = createJestConfig(customJestConfig)
 
-// 커버리지 설정만 명시적으로 덮어쓰기 (transform은 nextJest가 처리)
+// 커버리지 및 테스트 설정 명시적으로 적용
 module.exports = {
   ...jestConfig,
   collectCoverage: true,
@@ -51,4 +61,6 @@ module.exports = {
   coverageDirectory: customJestConfig.coverageDirectory,
   testMatch: customJestConfig.testMatch,
   testPathIgnorePatterns: customJestConfig.testPathIgnorePatterns,
+  // transform 설정 명시적으로 적용
+  transform: customJestConfig.transform,
 }
