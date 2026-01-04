@@ -10,38 +10,26 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  // __tests__ 디렉토리의 .test. 또는 .spec. 파일만 테스트 (testRegex만 사용)
-  testRegex: [
-    '/__tests__/.*\\.test\\.[jt]sx?$',
-    '/__tests__/.*\\.spec\\.[jt]sx?$',
+  
+  // 테스트 파일 찾기 (명확하게)
+  testMatch: [
+    '**/__tests__/**/*.[jt]s?(x)',
+    '**/?(*.)+(test).[tj]s?(x)',
   ],
-  // 존재하지 않는 파일 발견 방지 (강화된 무시 패턴)
+  
   testPathIgnorePatterns: [
     '/node_modules/',
     '/.next/',
     '/coverage/',
-    '/lib/',
-    '/utils/',
-    '/services/',
-    '/app/',
-    '/components/',
-    '/pages/',
   ],
-  // TypeScript 파일 확장자 명시
+  
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
-  // TypeScript 변환 보장 (next/jest가 처리하지만 명시적으로 설정)
   transformIgnorePatterns: [
     '/node_modules/',
     '^.+\\.module\\.(css|sass|scss)$',
   ],
-  // findRelatedTests 비활성화 (존재하지 않는 파일 찾기 방지)
-  findRelatedTests: false,
-}
-
-const jestConfig = createJestConfig(customJestConfig)
-
-module.exports = {
-  ...jestConfig,
+  
+  // 🔥 커버리지 설정 (명시적으로 강제)
   collectCoverage: true,
   collectCoverageFrom: [
     'lib/**/*.{js,jsx,ts,tsx}',
@@ -54,6 +42,21 @@ module.exports = {
     '!**/*.spec.{js,jsx,ts,tsx}',
     '!**/__tests__/**',
   ],
-  coverageReporters: ['lcov', 'text', 'json', 'html'],
+  coverageReporters: ['lcov', 'text', 'json'],
   coverageDirectory: 'coverage',
+}
+
+const jestConfig = createJestConfig(customJestConfig)
+
+// 🔥 nextJest가 커버리지 설정을 덮어쓰지 않도록 명시적으로 적용
+module.exports = {
+  ...jestConfig,
+  // 커버리지 설정 강제 적용
+  collectCoverage: true,
+  collectCoverageFrom: customJestConfig.collectCoverageFrom,
+  coverageReporters: customJestConfig.coverageReporters,
+  coverageDirectory: customJestConfig.coverageDirectory,
+  // 테스트 매칭 설정
+  testMatch: customJestConfig.testMatch,
+  testPathIgnorePatterns: customJestConfig.testPathIgnorePatterns,
 }
