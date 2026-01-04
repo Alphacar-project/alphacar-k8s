@@ -22,9 +22,12 @@ const customJestConfig = {
     '/.next/',
     '/coverage/',
   ],
+  // TypeScript 파일 확장자 명시
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
 }
 
 // createJestConfig는 이렇게 내보내집니다
+// nextJest가 자동으로 TypeScript 변환을 처리함
 const jestConfig = createJestConfig(customJestConfig)
 
 // 커버리지 설정을 명시적으로 추가 (nextJest가 덮어쓰지 않도록)
