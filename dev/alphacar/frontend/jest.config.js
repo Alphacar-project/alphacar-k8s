@@ -10,12 +10,7 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  // __tests__ 디렉토리의 .test. 또는 .spec. 파일만 테스트 (엄격한 패턴)
-  testMatch: [
-    '<rootDir>/__tests__/**/*.test.[jt]s?(x)',
-    '<rootDir>/__tests__/**/*.spec.[jt]s?(x)',
-  ],
-  // testMatch 대신 testRegex 사용하여 더 엄격한 패턴 적용
+  // __tests__ 디렉토리의 .test. 또는 .spec. 파일만 테스트 (testRegex만 사용)
   testRegex: [
     '/__tests__/.*\\.test\\.[jt]sx?$',
     '/__tests__/.*\\.spec\\.[jt]sx?$',
