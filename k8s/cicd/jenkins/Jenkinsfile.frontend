@@ -152,12 +152,27 @@ pipeline {
                                 node:20-alpine \\
                                 sh -c "
                                     npm install --legacy-peer-deps && \\
-                                    npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음'
+                                    npm test -- --watchAll=false --coverage
                                 "
                         """
                         
-                        // 커버리지 리포트 파일 확인
-                        sh "ls -la coverage/ 2>/dev/null || echo '⚠️ coverage 디렉토리가 없습니다'"
+                        // 커버리지 리포트 파일 확인 및 검증
+                        sh """
+                            if [ ! -d "coverage" ]; then
+                                echo "❌ coverage 디렉토리가 없습니다!"
+                                exit 1
+                            fi
+                            
+                            if [ ! -f "coverage/lcov.info" ]; then
+                                echo "❌ coverage/lcov.info 파일이 없습니다!"
+                                exit 1
+                            fi
+                            
+                            echo "✅ 커버리지 리포트 확인됨"
+                            echo "📄 파일 크기: \$(du -h coverage/lcov.info | cut -f1)"
+                            echo "📄 파일 첫 5줄:"
+                            head -5 coverage/lcov.info || true
+                        """
                     }
                     
                     // SonarQube 스캔 (withSonarQubeEnv 블록 밖에서 tool 설정)
@@ -206,6 +221,7 @@ pipeline {
                                     SOURCES="app"
                                     [ -d "components" ] && SOURCES="\${SOURCES},components"
                                     [ -d "lib" ] && SOURCES="\${SOURCES},lib"
+                                    [ -d "utils" ] && SOURCES="\${SOURCES},utils"
                                     [ -d "pages" ] && SOURCES="\${SOURCES},pages"
                                     echo "📁 분석할 소스 디렉토리: \${SOURCES}"
                                     
