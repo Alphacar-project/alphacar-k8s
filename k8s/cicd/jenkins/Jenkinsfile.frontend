@@ -18,6 +18,36 @@ pipeline {
         stage('0. Check Changes') {
             steps {
                 script {
+                    // 디스크 공간 확인 및 정리 (체크아웃 전에 실행)
+                    sh """
+                        echo "📊 디스크 사용량 확인:"
+                        df -h
+                        
+                        # 디스크 사용률 확인
+                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+                        echo "💾 디스크 사용률: \${USAGE}%"
+                        
+                        # 디스크 사용률이 70% 이상이면 자동으로 Docker 리소스 정리
+                        if [ \${USAGE} -gt 70 ]; then
+                            echo "⚠️ 경고: 디스크 사용률이 \${USAGE}%입니다. Docker 리소스 자동 정리 중..."
+                            docker system prune -a -f --volumes || true
+                            docker builder prune -a -f || true
+                            echo "✅ Docker 리소스 정리 완료. 디스크 사용량 재확인:"
+                            df -h
+                        fi
+                        
+                        # 여전히 디스크 공간이 부족하면 추가 정리
+                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+                        if [ \${USAGE} -gt 85 ]; then
+                            echo "⚠️ 심각: 디스크 사용률이 여전히 \${USAGE}%입니다. 추가 정리 중..."
+                            # Docker 이미지 강제 정리
+                            docker image prune -a -f || true
+                            docker container prune -f || true
+                            docker volume prune -f || true
+                            echo "✅ 추가 정리 완료. 디스크 사용량 최종 확인:"
+                            df -h
+                        fi
+                    """
                     cleanWs()
                     checkout scm
                     
