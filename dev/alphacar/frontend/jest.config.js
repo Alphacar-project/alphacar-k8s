@@ -50,3 +50,4 @@ module.exports = {
   // 커버리지 리포트 저장 디렉토리
   coverageDirectory: 'coverage',
 }
+
