@@ -338,29 +338,49 @@ pipeline {
                                             sleep(5) // 5초 대기
                                             attempt++
                                             
-                                            // Task 상태 확인
-                                            def taskResponse = sh(
-                                                script: "curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}'",
+                                            // Task 상태 확인 (jq 또는 grep으로 파싱)
+                                            def taskStatus = sh(
+                                                script: """
+                                                    TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}')
+                                                    if command -v jq >/dev/null 2>&1; then
+                                                        echo "\$TASK_RESPONSE" | jq -r '.task.status' 2>/dev/null || echo ''
+                                                    else
+                                                        echo "\$TASK_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo ''
+                                                    fi
+                                                """,
                                                 returnStdout: true
                                             ).trim()
-                                            
-                                            def taskJson = readJSON text: taskResponse
-                                            def taskStatus = taskJson.task.status
                                             
                                             echo "📊 Task 상태 (시도 ${attempt}/${maxAttempts}): ${taskStatus}"
                                             
                                             if (taskStatus == 'SUCCESS' || taskStatus == 'FAILED' || taskStatus == 'CANCELED') {
-                                                // Quality Gate 상태 확인
-                                                def analysisId = taskJson.task.analysisId
-                                                if (analysisId) {
+                                                // analysisId 추출
+                                                def analysisId = sh(
+                                                    script: """
+                                                        TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}')
+                                                        if command -v jq >/dev/null 2>&1; then
+                                                            echo "\$TASK_RESPONSE" | jq -r '.task.analysisId' 2>/dev/null || echo ''
+                                                        else
+                                                            echo "\$TASK_RESPONSE" | grep -o '"analysisId":"[^"]*"' | head -1 | cut -d'"' -f4 || echo ''
+                                                        fi
+                                                    """,
+                                                    returnStdout: true
+                                                ).trim()
+                                                
+                                                if (analysisId && analysisId != 'null' && analysisId != '') {
+                                                    // Quality Gate 상태 확인
                                                     def qgUrl = "${env.SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${analysisId}"
-                                                    def qgResponse = sh(
-                                                        script: "curl -s -u \${SONAR_TOKEN}: '${qgUrl}'",
+                                                    qgStatus = sh(
+                                                        script: """
+                                                            QG_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${qgUrl}')
+                                                            if command -v jq >/dev/null 2>&1; then
+                                                                echo "\$QG_RESPONSE" | jq -r '.projectStatus.status' 2>/dev/null || echo ''
+                                                            else
+                                                                echo "\$QG_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo ''
+                                                            fi
+                                                        """,
                                                         returnStdout: true
                                                     ).trim()
-                                                    
-                                                    def qgJson = readJSON text: qgResponse
-                                                    qgStatus = qgJson.projectStatus.status
                                                     
                                                     echo "✅ Quality Gate 상태: ${qgStatus}"
                                                     break
