@@ -456,16 +456,34 @@ pipeline {
                         
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
-                            // Docker 빌드 캐시 활용 (빌드 시간 단축)
-                            // 일반 docker build 사용 (BuildKit 제거)
-                            // --pull 제거하여 캐시된 베이스 이미지 사용
-                            sh """
-                                docker build \\
-                                    -f Dockerfile \\
-                                    -t ${imageFullTag} \\
-                                    --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
-                                    .
-                            """
+                            // Docker 빌드 (캐시 문제 발생 시 재시도)
+                            def buildSuccess = false
+                            try {
+                                // 먼저 캐시를 활용하여 빌드 시도
+                                sh """
+                                    docker build \\
+                                        -f Dockerfile \\
+                                        -t ${imageFullTag} \\
+                                        --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
+                                        .
+                                """
+                                buildSuccess = true
+                            } catch (Exception e) {
+                                echo "⚠️ 캐시를 사용한 빌드 실패, 캐시 없이 재시도합니다..."
+                                // 캐시 없이 재시도
+                                sh """
+                                    docker build \\
+                                        -f Dockerfile \\
+                                        -t ${imageFullTag} \\
+                                        --no-cache \\
+                                        .
+                                """
+                                buildSuccess = true
+                            }
+                            
+                            if (!buildSuccess) {
+                                error "❌ Docker 빌드 실패"
+                            }
                         }
 
                         // AWS ECR 로그인
