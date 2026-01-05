@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager-lambda-invoker
+  namespace: apc-obsv-ns
+  labels:
+    app: alertmanager-lambda-invoker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager-lambda-invoker
+  template:
+    metadata:
+      labels:
+        app: alertmanager-lambda-invoker
+    spec:
+      serviceAccountName: alertmanager-lambda-invoker
+      containers:
+      - name: invoker
+        image: amazon/aws-cli:latest
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          while true; do
+            sleep 3600
+          done
+        env:
+        - name: AWS_REGION
+          value: "ap-northeast-2"
+        - name: LAMBDA_FUNCTION_NAME
+          value: "alertmanager-webhook-handler"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alertmanager-lambda-invoker
+  namespace: apc-obsv-ns
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::382045063773:role/alertmanager-lambda-invoker-role
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-lambda-invoker
+  namespace: apc-obsv-ns
+spec:
+  selector:
+    app: alertmanager-lambda-invoker
+  ports:
+  - port: 8080
+    targetPort: 8080

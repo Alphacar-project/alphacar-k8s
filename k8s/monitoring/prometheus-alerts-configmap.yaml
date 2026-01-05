@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts-config
+  namespace: apc-obsv-ns
+data:
+  prometheus-alerts.yaml: |
+    groups:
+      - name: kubernetes-pod-alerts
+        interval: 30s
+        rules:
+          # Pod CrashLoopBackOff 알림
+          - alert: PodCrashLooping
+            expr: |
+              rate(kube_pod_container_status_restarts_total[15m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last 15 minutes."
+          
+          # Pod가 Pending 상태로 오래 머무름
+          - alert: PodStuckPending
+            expr: |
+              kube_pod_status_phase{phase="Pending"} > 0
+            for: 10m
+            labels:
+              severity: warning
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is stuck in Pending state"
+              description: "Pod {{ $labels.pod }} has been in Pending state for more than 10 minutes."
+          
+          # Pod가 ImagePullBackOff 상태
+          - alert: PodImagePullBackOff
+            expr: |
+              kube_pod_container_status_waiting_reason{reason="ImagePullBackOff"} > 0
+            for: 5m
+            labels:
+              severity: critical
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} cannot pull image"
+              description: "Pod {{ $labels.pod }} is in ImagePullBackOff state. Check image name, tag, or registry access."
+          
+          # Pod가 ErrImagePull 상태
+          - alert: PodErrImagePull
+            expr: |
+              kube_pod_container_status_waiting_reason{reason="ErrImagePull"} > 0
+            for: 5m
+            labels:
+              severity: critical
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} image pull error"
+              description: "Pod {{ $labels.pod }} failed to pull image. Check image registry or authentication."
+          
+          # Pod가 ContainerCreating 상태로 오래 머무름
+          - alert: PodStuckContainerCreating
+            expr: |
+              kube_pod_container_status_waiting_reason{reason="ContainerCreating"} > 0
+            for: 10m
+            labels:
+              severity: warning
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is stuck creating container"
+              description: "Pod {{ $labels.pod }} has been creating container for more than 10 minutes."
+          
+          # Pod가 OOMKilled 상태
+          - alert: PodOOMKilled
+            expr: |
+              kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} > 0
+            for: 1m
+            labels:
+              severity: critical
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} was killed due to OOM"
+              description: "Pod {{ $labels.pod }} was terminated due to Out of Memory. Consider increasing memory limits."
+      
+      - name: kubernetes-resource-alerts
+        interval: 30s
+        rules:
+          # 높은 CPU 사용률
+          - alert: HighCPUUsage
+            expr: |
+              sum(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) by (pod, namespace) 
+              / 
+              sum(container_spec_cpu_quota{container!="POD",container!=""}/container_spec_cpu_period{container!="POD",container!=""}) by (pod, namespace) 
+              * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+              component: resource
+            annotations:
+              summary: "High CPU usage on pod {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "Pod {{ $labels.pod }} CPU usage is {{ $value }}% (threshold: 85%)"
+          
+          # 높은 메모리 사용률
+          - alert: HighMemoryUsage
+            expr: |
+              (sum(container_memory_working_set_bytes{container!="POD",container!=""}) by (pod, namespace) 
+              / 
+              sum(container_spec_memory_limit_bytes{container!="POD",container!=""} > 0) by (pod, namespace)) 
+              * 100 > 90
+            for: 5m
+            labels:
+              severity: warning
+              component: resource
+            annotations:
+              summary: "High memory usage on pod {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "Pod {{ $labels.pod }} memory usage is {{ $value }}% (threshold: 90%)"
+          
+          # 노드 CPU 사용률 높음
+          - alert: NodeHighCPUUsage
+            expr: |
+              (1 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])))) * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High CPU usage on node {{ $labels.instance }}"
+              description: "Node CPU usage is {{ $value }}% (threshold: 80%)"
+          
+          # 노드 메모리 사용률 높음
+          - alert: NodeHighMemoryUsage
+            expr: |
+              (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High memory usage on node {{ $labels.instance }}"
+              description: "Node memory usage is {{ $value }}% (threshold: 85%)"
+          
+          # 디스크 사용률 높음
+          - alert: NodeHighDiskUsage
+            expr: |
+              (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 85
+            for: 10m
+            labels:
+              severity: warning
+              component: node
+            annotations:
+              summary: "High disk usage on node {{ $labels.instance }}"
+              description: "Node disk usage is {{ $value }}% (threshold: 85%)"
+      
+      - name: kubernetes-availability-alerts
+        interval: 30s
+        rules:
+          # Pod가 Ready 상태가 아님
+          - alert: PodNotReady
+            expr: |
+              sum by (pod, namespace) (kube_pod_status_ready{condition="false"}) > 0
+            for: 5m
+            labels:
+              severity: warning
+              component: pod
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is not ready"
+              description: "Pod {{ $labels.pod }} has been not ready for more than 5 minutes."
+          
+          # 노드가 NotReady 상태
+          - alert: NodeNotReady
+            expr: |
+              kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: node
+            annotations:
+              summary: "Node {{ $labels.node }} is not ready"
+              description: "Node {{ $labels.node }} has been in NotReady state for more than 5 minutes."

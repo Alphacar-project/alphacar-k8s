@@ -1,0 +1,9 @@
+{
+  "name": "alertmanager-lambda-handler",
+  "version": "1.0.0",
+  "description": "AWS Lambda handler for Prometheus Alertmanager webhook",
+  "main": "alertmanagerHandler.js",
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.0.0"
+  }
+}

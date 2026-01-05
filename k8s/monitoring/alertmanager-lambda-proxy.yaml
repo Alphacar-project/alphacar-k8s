@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager-lambda-proxy
+  namespace: apc-obsv-ns
+  labels:
+    app: alertmanager-lambda-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager-lambda-proxy
+  template:
+    metadata:
+      labels:
+        app: alertmanager-lambda-proxy
+    spec:
+      serviceAccountName: alertmanager-lambda-proxy
+      containers:
+      - name: proxy
+        image: node:18-alpine
+        workingDir: /app
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          mkdir -p /app
+          apk add --no-cache curl
+          cat > /app/server.js << 'EOF'
+          const express = require('express');
+          const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+          const app = express();
+          app.use(express.json());
+          
+          const lambda = new LambdaClient({ region: process.env.AWS_REGION || 'ap-northeast-2' });
+          const functionName = process.env.LAMBDA_FUNCTION_NAME || 'alertmanager-webhook-handler';
+          
+          app.post('/', async (req, res) => {
+            try {
+              console.log('Received webhook:', JSON.stringify(req.body, null, 2));
+              const command = new InvokeCommand({
+                FunctionName: functionName,
+                InvocationType: 'RequestResponse',
+                Payload: JSON.stringify(req.body)
+              });
+              
+              const response = await lambda.send(command);
+              const result = JSON.parse(Buffer.from(response.Payload).toString());
+              
+              console.log('Lambda response:', JSON.stringify(result, null, 2));
+              res.status(200).json(result);
+            } catch (error) {
+              console.error('Lambda invoke error:', error);
+              res.status(500).json({ success: false, error: error.message });
+            }
+          });
+          
+          app.listen(8080, () => console.log('Lambda proxy listening on port 8080'));
+          EOF
+          npm install @aws-sdk/client-lambda express
+          node /app/server.js
+        env:
+        - name: AWS_REGION
+          value: "ap-northeast-2"
+        - name: LAMBDA_FUNCTION_NAME
+          value: "alertmanager-webhook-handler"
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alertmanager-lambda-proxy
+  namespace: apc-obsv-ns
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::382045063773:role/alertmanager-lambda-invoker-role
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-lambda-proxy
+  namespace: apc-obsv-ns
+spec:
+  selector:
+    app: alertmanager-lambda-proxy
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP

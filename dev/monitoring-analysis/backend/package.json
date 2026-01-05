@@ -1,0 +1,12 @@
+{
+  "name": "monitoring-analysis-backend",
+  "version": "3.0.0",
+  "description": "AIOps Monitoring Analysis Backend",
+  "main": "server.js",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

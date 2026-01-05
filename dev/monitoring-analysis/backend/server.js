@@ -18,6 +18,7 @@ const bedrockModelId = process.env.BEDROCK_LLM_MODEL_ID || 'us.meta.llama3-3-70b
 const bedrockGuardrailId = process.env.BEDROCK_GUARDRAIL_ID || '';
 const bedrockGuardrailVersion = process.env.BEDROCK_GUARDRAIL_VERSION || 'DRAFT';
 
+
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -2413,6 +2414,46 @@ const server = http.createServer(async (req, res) => {
       const conditions = podStatus.conditions || [];
       const containerStatuses = podStatus.containerStatuses || [];
       
+      // 상세 상태 추출 (위와 동일한 로직)
+      const phase = podStatus.phase || 'Unknown';
+      let detailedStatus = phase;
+      let statusReason = '';
+      let statusMessage = '';
+      
+      if (containerStatuses.length > 0) {
+        for (const cs of containerStatuses) {
+          if (cs.state) {
+            if (cs.state.waiting) {
+              const reason = cs.state.waiting.reason;
+              if (reason) {
+                detailedStatus = reason;
+                statusReason = reason;
+                statusMessage = cs.state.waiting.message || '';
+                break;
+              }
+            } else if (cs.state.terminated) {
+              if (cs.state.terminated.exitCode !== 0) {
+                detailedStatus = cs.state.terminated.reason || 'Error';
+                statusReason = cs.state.terminated.reason || 'Error';
+                statusMessage = cs.state.terminated.message || '';
+                break;
+              }
+            } else if (cs.state.running) {
+              if (detailedStatus === phase || detailedStatus === 'Unknown') {
+                detailedStatus = 'Running';
+              }
+            }
+          }
+        }
+      }
+      
+      const podScheduled = conditions.find(c => c.type === 'PodScheduled');
+      if (podScheduled && podScheduled.status === 'False') {
+        detailedStatus = 'Unschedulable';
+        statusReason = podScheduled.reason || 'Unschedulable';
+        statusMessage = podScheduled.message || '';
+      }
+      
       // 문제점 추출
       const issues = [];
       conditions.forEach(cond => {
@@ -2465,7 +2506,7 @@ ${podInfoText}
 **필수 섹션 (각 섹션을 완전한 문장으로 작성):**
 
 1. **Pod 상태 상세 분석**
-   - 현재 Pod 상태(${podStatus.phase || 'Unknown'})의 의미와 해석
+   - 현재 Pod 상태(${detailedStatus || podStatus.phase || 'Unknown'})의 의미와 해석
    - 각 조건(Conditions)의 상태 분석 및 의미
    - Container들의 Ready 상태와 재시작 횟수 분석
    - 노드 할당 및 스케줄링 상태
@@ -2514,7 +2555,7 @@ ${podInfoText}
         // Fallback 분석
         analysisText = `## Pod 분석 결과\n\n`;
         analysisText += `**Pod**: ${namespace}/${podName}\n`;
-        analysisText += `**상태**: ${podStatus.phase || 'Unknown'}\n\n`;
+        analysisText += `**상태**: ${detailedStatus || podStatus.phase || 'Unknown'}\n\n`;
         
         if (issues.length > 0) {
           analysisText += `**발견된 문제**:\n`;
@@ -2537,13 +2578,17 @@ ${podInfoText}
       res.end(JSON.stringify({
         podName,
         namespace,
-        status: podStatus.phase || 'Unknown',
+        status: phase,
+        detailedStatus: detailedStatus,
+        statusReason: statusReason,
+        statusMessage: statusMessage,
         issues,
         analysis: analysisText,
         podInfo: {
           node: podSpec.nodeName,
           createdAt: podInfo.metadata?.creationTimestamp,
           conditions: conditions,
+          detailedStatus: detailedStatus,
           containers: containerStatuses.map(cs => ({
             name: cs.name,
             ready: cs.ready,
@@ -3187,12 +3232,41 @@ ${podInfoText}
               if (!podsByNode[nodeName]) {
                 podsByNode[nodeName] = [];
               }
+              // Pod 상세 상태 추출 (위와 동일한 로직)
+              const phase = pod.status.phase || 'Unknown';
+              let detailedStatus = phase;
+              let statusReason = '';
+              const containerStatuses = pod.status.containerStatuses || [];
+              
+              if (containerStatuses.length > 0) {
+                for (const cs of containerStatuses) {
+                  if (cs.state?.waiting) {
+                    const reason = cs.state.waiting.reason;
+                    if (reason) {
+                      detailedStatus = reason;
+                      statusReason = reason;
+                      break;
+                    }
+                  } else if (cs.state?.terminated && cs.state.terminated.exitCode !== 0) {
+                    detailedStatus = cs.state.terminated.reason || 'Error';
+                    statusReason = cs.state.terminated.reason || 'Error';
+                    break;
+                  } else if (cs.state?.running) {
+                    if (detailedStatus === phase || detailedStatus === 'Unknown') {
+                      detailedStatus = 'Running';
+                    }
+                  }
+                }
+              }
+              
               podsByNode[nodeName].push({
                 name: pod.metadata.name,
                 namespace: pod.metadata.namespace,
-                status: pod.status.phase || 'Unknown',
-                ready: pod.status.containerStatuses?.some(cs => cs.ready) || false,
-                containers: pod.status.containerStatuses?.length || 0
+                status: phase,
+                detailedStatus: detailedStatus,
+                statusReason: statusReason,
+                ready: containerStatuses.some(cs => cs.ready) || false,
+                containers: containerStatuses.length
               });
             }
           });
@@ -3272,13 +3346,86 @@ ${podInfoText}
         req.end();
       });
       
-      const pods = podsData.items.map(pod => ({
-        name: pod.metadata.name,
-        namespace: pod.metadata.namespace,
-        status: pod.status.phase || 'Unknown',
-        node: pod.spec.nodeName || 'N/A',
-        createdAt: pod.metadata.creationTimestamp
-      }));
+      const pods = podsData.items.map(pod => {
+        // 기본 phase
+        const phase = pod.status.phase || 'Unknown';
+        let detailedStatus = phase;
+        let statusReason = '';
+        let statusMessage = '';
+        
+        // containerStatuses에서 상세 상태 추출
+        const containerStatuses = pod.status.containerStatuses || [];
+        
+        if (containerStatuses.length > 0) {
+          // 모든 컨테이너의 상태 확인 (가장 심각한 상태를 우선 표시)
+          for (const cs of containerStatuses) {
+            if (cs.state) {
+              // Waiting 상태 (이미지 다운로드, 컨테이너 생성 등)
+              if (cs.state.waiting) {
+                const reason = cs.state.waiting.reason;
+                if (reason) {
+                  detailedStatus = reason;
+                  statusReason = reason;
+                  statusMessage = cs.state.waiting.message || '';
+                  break; // 첫 번째 문제 상태를 사용
+                }
+              }
+              // Terminated 상태 (종료된 컨테이너)
+              else if (cs.state.terminated) {
+                if (cs.state.terminated.exitCode !== 0) {
+                  detailedStatus = cs.state.terminated.reason || 'Error';
+                  statusReason = cs.state.terminated.reason || 'Error';
+                  statusMessage = cs.state.terminated.message || '';
+                  break;
+                }
+              }
+              // Running 상태
+              else if (cs.state.running) {
+                // 모든 컨테이너가 Running이면 Running 유지
+                if (detailedStatus === phase || detailedStatus === 'Unknown') {
+                  detailedStatus = 'Running';
+                }
+              }
+            }
+          }
+          
+          // Init Container 상태 확인
+          const initContainerStatuses = pod.status.initContainerStatuses || [];
+          for (const ics of initContainerStatuses) {
+            if (ics.state?.waiting) {
+              const reason = ics.state.waiting.reason;
+              if (reason && reason !== 'PodInitializing') {
+                detailedStatus = reason;
+                statusReason = reason;
+                statusMessage = ics.state.waiting.message || '';
+              }
+            }
+          }
+        }
+        
+        // Pod Conditions에서 추가 정보 추출
+        const conditions = pod.status.conditions || [];
+        const podScheduled = conditions.find(c => c.type === 'PodScheduled');
+        if (podScheduled && podScheduled.status === 'False') {
+          detailedStatus = 'Unschedulable';
+          statusReason = podScheduled.reason || 'Unschedulable';
+          statusMessage = podScheduled.message || '';
+        }
+        
+        return {
+          name: pod.metadata.name,
+          namespace: pod.metadata.namespace,
+          status: phase, // 기본 phase (호환성 유지)
+          detailedStatus: detailedStatus, // 상세 상태
+          statusReason: statusReason, // 상태 이유
+          statusMessage: statusMessage, // 상태 메시지
+          node: pod.spec.nodeName || 'N/A',
+          createdAt: pod.metadata.creationTimestamp,
+          ready: containerStatuses.some(cs => cs.ready) || false,
+          containers: containerStatuses.length,
+          restartCount: containerStatuses.reduce((sum, cs) => sum + (cs.restartCount || 0), 0)
+        };
+      });
       
       res.writeHead(200, {'Content-Type': 'application/json'});
       res.end(JSON.stringify({ pods, total: pods.length }));
@@ -4408,6 +4555,8 @@ setInterval(async () => {
     console.error('Periodic resource check error:', err.message);
   }
 }, 300000); // 5분마다 체크
+
+
 
 server.listen(port, () => {
   console.log('Server running on port ' + port);

@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: apc-obsv-ns
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    
+    route:
+      receiver: 'webhook'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+    
+    receivers:
+      - name: 'webhook'
+        webhook_configs:
+          - url: 'http://monitoring-analysis-backend.apc-obsv-ns.svc.cluster.local:5000/api/aiops/workflows'
+            http_config:
+              follow_redirects: true
+            send_resolved: false  # resolved 알림은 보내지 않음
