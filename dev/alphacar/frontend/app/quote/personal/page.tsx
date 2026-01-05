@@ -173,7 +173,23 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
                       .then(handleApiResponse)
                       .then((trimData: any) => {
                         if (Array.isArray(trimData)) {
-                          setTrims(trimData);
+                          // ✅ 선택한 기본트림에 해당하는 세부트림만 필터링
+                          const filteredTrims = trimData.filter((t: Trim) => {
+                            const trimBaseTrimName = t.base_trim_name || t.baseTrimName || "";
+                            const matchesBaseTrim = trimBaseTrimName === initBaseTrimName || 
+                                                   trimBaseTrimName === initBaseTrim?.name ||
+                                                   trimBaseTrimName === initBaseTrim?.base_trim_name;
+                            return matchesBaseTrim || (!trimBaseTrimName && initBaseTrimName);
+                          });
+                          
+                          console.log("[초기 세부 트림] 필터링 결과:", {
+                            전체개수: trimData.length,
+                            필터링후개수: filteredTrims.length,
+                            initBaseTrimName,
+                            필터링된트림: filteredTrims.map((t: Trim) => t.trim_name || t.name)
+                          });
+                          
+                          setTrims(filteredTrims);
                           
                           // 세부 트림 선택
                           if (initTrimId) {
@@ -335,8 +351,27 @@ function CarSelector({ onSelectComplete, onReset, initialData }: CarSelectorProp
       .then((data: any) => {
         console.log("[세부 트림] API 응답:", data);
         if (Array.isArray(data)) {
-          console.log("[세부 트림] 트림 개수:", data.length);
-          setTrims(data);
+          // ✅ 선택한 기본트림에 해당하는 세부트림만 필터링
+          const filteredTrims = data.filter((t: Trim) => {
+            // baseTrimName과 일치하는 세부트림만 선택
+            const trimBaseTrimName = t.base_trim_name || t.baseTrimName || "";
+            const matchesBaseTrim = trimBaseTrimName === baseTrimName || 
+                                   trimBaseTrimName === foundBaseTrim?.name ||
+                                   trimBaseTrimName === foundBaseTrim?.base_trim_name;
+            
+            // base_trim_name이 없는 경우도 있을 수 있으므로, 
+            // baseTrimName이 정확히 일치하는 경우만 필터링
+            return matchesBaseTrim || (!trimBaseTrimName && baseTrimName);
+          });
+          
+          console.log("[세부 트림] 필터링 결과:", {
+            전체개수: data.length,
+            필터링후개수: filteredTrims.length,
+            baseTrimName,
+            필터링된트림: filteredTrims.map((t: Trim) => t.trim_name || t.name)
+          });
+          
+          setTrims(filteredTrims);
           // 자동 선택 로직 제거 - 사용자가 직접 선택하도록 함
         } else {
           console.warn("[세부 트림] 응답이 배열이 아님:", data);

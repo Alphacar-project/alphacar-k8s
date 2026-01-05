@@ -190,8 +190,27 @@ function CarSelector({ title, onSelectComplete, onReset, resetSignal }: CarSelec
       .then((data) => {
         console.log("[세부 트림] API 응답:", data);
         if (Array.isArray(data)) {
-          console.log("[세부 트림] 트림 개수:", data.length);
-          setTrims(data);
+          // ✅ 선택한 기본트림에 해당하는 세부트림만 필터링
+          const filteredTrims = data.filter((t: any) => {
+            // baseTrimName과 일치하는 세부트림만 선택
+            const trimBaseTrimName = t.base_trim_name || t.baseTrimName || "";
+            const matchesBaseTrim = trimBaseTrimName === baseTrimName || 
+                                   trimBaseTrimName === foundBaseTrim?.name ||
+                                   trimBaseTrimName === foundBaseTrim?.base_trim_name;
+            
+            // base_trim_name이 없는 경우도 있을 수 있으므로, 
+            // baseTrimName이 정확히 일치하는 경우만 필터링
+            return matchesBaseTrim || (!trimBaseTrimName && baseTrimName);
+          });
+          
+          console.log("[세부 트림] 필터링 결과:", {
+            전체개수: data.length,
+            필터링후개수: filteredTrims.length,
+            baseTrimName,
+            필터링된트림: filteredTrims.map((t: any) => t.trim_name || t.name)
+          });
+          
+          setTrims(filteredTrims);
           // 자동 선택 로직 제거 - 사용자가 직접 선택하도록 함
         } else {
           console.warn("[세부 트림] 응답이 배열이 아님:", data);
