@@ -205,14 +205,23 @@ pipeline {
                     script {
                         echo "🐳 Docker 컨테이너에서 테스트 실행 중..."
                         
-                        // Docker를 사용하여 테스트 실행 (Node.js 설치 불필요)
+                        // NPM 캐시 디렉토리 생성 및 권한 설정
+                        sh """
+                            mkdir -p /var/lib/jenkins/.npm || true
+                            chown -R jenkins:jenkins /var/lib/jenkins/.npm 2>/dev/null || sudo chown -R jenkins:jenkins /var/lib/jenkins/.npm || true
+                            echo "📦 NPM 캐시 디렉토리 준비 완료"
+                        """
+                        
+                        // Docker를 사용하여 테스트 실행 (NPM 캐시 활용으로 빌드 시간 단축)
                         // 테스트 실패해도 빌드 계속 진행 (커버리지 0%여도 통과 가능)
                         sh """
                             docker run --rm \\
+                                -v /var/lib/jenkins/.npm:/.npm \\
                                 -v \$(pwd):/app \\
                                 -w /app \\
                                 node:20-alpine \\
                                 sh -c "
+                                    npm config set cache /.npm --global && \\
                                     npm install --legacy-peer-deps && \\
                                     npm test -- --watchAll=false --coverage || echo '⚠️ 테스트 실행 실패 또는 테스트 없음 - 빌드 계속 진행'
                                 " || echo '⚠️ 테스트 실행 실패 - 빌드 계속 진행'
@@ -549,21 +558,37 @@ pipeline {
 
     post {
         always {
-            sh """
-                echo "🧹 빌드 후 리소스 정리 중..."
-                
-                # Docker 리소스 정리
-                docker system prune -f || true
-                docker image prune -f || true
-                docker container prune -f || true
-                docker builder prune -f || true
-                docker volume prune -f || true
-                
-                # 디스크 사용량 확인
-                echo "📊 최종 디스크 사용량:"
-                df -h
-            """
-            cleanWs()
+            script {
+                sh """
+                    echo "📊 빌드 후 디스크 사용량 확인..."
+                    USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
+                    echo "💾 현재 디스크 사용률: \${USAGE}%"
+                    
+                    if [ \${USAGE} -gt 80 ]; then
+                        echo "⚠️ 디스크 부족(\${USAGE}%)으로 인해 선택적 정리 작업을 시작합니다."
+                        
+                        # 24시간 이상 된 이미지만 삭제 (최근 이미지는 보존)
+                        docker image prune -a -f --filter "until=24h" || true
+                        
+                        # 중지된 컨테이너만 삭제
+                        docker container prune -f || true
+                        
+                        # 사용하지 않는 볼륨만 삭제
+                        docker volume prune -f || true
+                        
+                        # 빌더 캐시는 유지 (빌드 속도에 중요)
+                        # docker builder prune -f  # 주석 처리
+                        
+                        echo "✅ 선택적 정리 완료"
+                    else
+                        echo "✅ 디스크 여유 공간 충분(\${USAGE}%) - 정리 스킵 (캐시 보존)"
+                    fi
+                    
+                    echo "📊 최종 디스크 사용량:"
+                    df -h
+                """
+                cleanWs()
+            }
         }
     }
 }
