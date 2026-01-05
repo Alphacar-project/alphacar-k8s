@@ -138,15 +138,22 @@ pipeline {
                         return
                     }
                     
-                    // frontend-Jenkinsfile 변경은 무시하되, 다른 Jenkinsfile 변경은 허용
+                    // frontend-Jenkinsfile 변경은 조건부 허용 ([skip ci]가 있으면 스킵)
                     def fileList = changedFiles.split('\n')
                     def frontendChanged = false
                     
                     for (file in fileList) {
                         file = file.trim()
-                        // frontend-Jenkinsfile 변경은 무시
+                        // Jenkinsfile 변경은 [skip ci]가 없을 때만 빌드 트리거
                         if (file.contains('frontend-Jenkinsfile') || file.contains('Jenkinsfile.frontend')) {
-                            continue
+                            if (!commitMessage.contains('[skip ci]')) {
+                                frontendChanged = true
+                                echo "✅ Jenkinsfile 변경 감지: ${file} ([skip ci] 없음 - 빌드 진행)"
+                                break
+                            } else {
+                                echo "⏭️ Jenkinsfile 변경 감지되었지만 [skip ci]로 인해 스킵: ${file}"
+                                continue
+                            }
                         }
                         if (file.contains('dev/alphacar/frontend')) {
                             frontendChanged = true
