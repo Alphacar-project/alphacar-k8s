@@ -116,24 +116,25 @@ export default function FavoritePage() {
     console.log("💖 [찜 목록 페이지] 차량 클릭:", { carName, modelName, brandName, trimId, baseTrimName, car });
 
     // 개별 견적 페이지로 이동 (제조사, 차종, 기본트림, 세부트림 정보 모두 전달)
+    // URLSearchParams.append()는 자동으로 인코딩하므로 encodeURIComponent 불필요
     const queryParams = new URLSearchParams();
     
-    // 세부트림 ID (필수)
-    queryParams.append('trimId', encodeURIComponent(String(trimId)));
+    // 세부트림 ID (필수) - MongoDB ObjectId 또는 trim_name일 수 있음
+    queryParams.append('trimId', String(trimId));
     
     // 차종명 (선택)
     if (modelName) {
-      queryParams.append('modelName', encodeURIComponent(modelName));
+      queryParams.append('modelName', modelName);
     }
     
     // 제조사명 (선택)
     if (brandName) {
-      queryParams.append('brandName', encodeURIComponent(brandName));
+      queryParams.append('brandName', brandName);
     }
     
     // 기본트림명 (선택, 있으면 전달)
     if (baseTrimName) {
-      queryParams.append('baseTrimName', encodeURIComponent(baseTrimName));
+      queryParams.append('baseTrimName', baseTrimName);
     }
     
     router.push(`/quote/personal?${queryParams.toString()}`);

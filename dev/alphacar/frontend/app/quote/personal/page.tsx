@@ -516,18 +516,45 @@ function PersonalQuotePageContent() {
   // ✅ [핵심 수정] 트림 추출 및 병합 로직을 포함한 fetch 함수
   const fetchCarDetail = async (trimId: string, modelName?: string, baseTrimId?: string): Promise<VehicleData | null> => {
     try {
+      // trimId 디코딩 (이중 인코딩된 경우 대비)
+      const decodedTrimId = trimId.includes('%') ? decodeURIComponent(trimId) : trimId;
+      
       // 차종 이름이 있으면 함께 전달
-      const queryParams = new URLSearchParams({ trimId });
+      const queryParams = new URLSearchParams({ trimId: decodedTrimId });
       if (modelName) {
         queryParams.append('modelName', modelName);
       }
       if (baseTrimId) {
         queryParams.append('baseTrimId', baseTrimId);
       }
+      
+      console.log("🚗 [fetchCarDetail] API 호출:", `${API_BASE}/vehicles/detail?${queryParams.toString()}`);
       const res = await fetch(`${API_BASE}/vehicles/detail?${queryParams.toString()}`);
+      
       if (!res.ok) {
           let errorMsg = `조회 실패`;
-          try { const errJson = await res.json(); if (errJson.message) errorMsg = errJson.message; } catch(e) {}
+          let errorData: any = null;
+          try { 
+            errorData = await res.json(); 
+            if (errorData.message) errorMsg = errorData.message; 
+          } catch(e) {}
+          
+          // 404 에러인 경우 trimId가 MongoDB ObjectId일 수 있으므로 다른 방법 시도
+          if (res.status === 404 && decodedTrimId && decodedTrimId.length === 24) {
+            console.warn("🚗 [fetchCarDetail] 404 에러 - MongoDB ObjectId로 보임, 대체 방법 시도:", decodedTrimId);
+            // trimId가 MongoDB ObjectId인 경우, vehicleId로 직접 조회 시도
+            try {
+              const vehicleRes = await fetch(`${API_BASE}/vehicles/${decodedTrimId}`);
+              if (vehicleRes.ok) {
+                const vehicleData = await vehicleRes.json();
+                console.log("🚗 [fetchCarDetail] vehicleId로 조회 성공:", vehicleData);
+                return vehicleData;
+              }
+            } catch (vehicleErr) {
+              console.error("🚗 [fetchCarDetail] vehicleId 조회 실패:", vehicleErr);
+            }
+          }
+          
           throw new Error(errorMsg);
       }
       const rawVehicleData: any = await res.json(); // 전체 Vehicle 데이터
@@ -537,25 +564,41 @@ function PersonalQuotePageContent() {
       const trims = rawVehicleData.trims || [];
 
       if (trims.length > 0) {
-          const decodedTrimId = decodeURIComponent(trimId);
           // "Reserve A/T:1" 형식에서 실제 트림 이름만 추출 (":숫자" 제거)
           const trimNameOnly = decodedTrimId.split(':')[0].trim();
           
-          // 1. _id로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
-          selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
+          // 1. _id로 먼저 찾기 (가장 정확한 매칭, 고유성 보장) - MongoDB ObjectId 포함
+          selectedTrim = trims.find((t: any) => 
+            t._id === decodedTrimId || 
+            String(t._id) === String(decodedTrimId) ||
+            t._id === trimId ||
+            String(t._id) === String(trimId)
+          );
 
           // 2. trim_id로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
+              selectedTrim = trims.find((t: any) => 
+                t.trim_id === decodedTrimId || 
+                t.trim_id === trimId ||
+                String(t.trim_id) === String(decodedTrimId) ||
+                String(t.trim_id) === String(trimId)
+              );
           }
 
           // 3. 이름으로 정확히 일치하는 트림 찾기 (String ID 대응)
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.trim_name === trimNameOnly || t.trim_name === decodedTrimId);
+              selectedTrim = trims.find((t: any) => 
+                t.trim_name === trimNameOnly || 
+                t.trim_name === decodedTrimId ||
+                t.trim_name === trimId ||
+                t.name === decodedTrimId ||
+                t.name === trimId
+              );
           }
 
           // 4. Fallback: 여전히 못 찾았다면 첫 번째 트림 사용
           if (!selectedTrim) {
+              console.warn("🚗 [fetchCarDetail] 트림을 찾지 못해 첫 번째 트림 사용:", { decodedTrimId, trimId, trimsCount: trims.length });
               selectedTrim = trims[0]; 
           }
       }
@@ -713,10 +756,17 @@ function PersonalQuotePageContent() {
 
   // URL 파라미터에서 trimId, modelName, brandName, baseTrimName 읽어서 자동 선택
   useEffect(() => {
-    const trimId = searchParams.get("trimId");
-    const modelName = searchParams.get("modelName");
-    const brandName = searchParams.get("brandName");
-    const baseTrimName = searchParams.get("baseTrimName");
+    // searchParams.get()은 자동으로 디코딩하지만, 이중 인코딩된 경우를 대비해 추가 디코딩
+    const trimIdRaw = searchParams.get("trimId");
+    const modelNameRaw = searchParams.get("modelName");
+    const brandNameRaw = searchParams.get("brandName");
+    const baseTrimNameRaw = searchParams.get("baseTrimName");
+    
+    // 이중 인코딩된 경우를 대비해 디코딩 시도
+    const trimId = trimIdRaw ? (trimIdRaw.includes('%') ? decodeURIComponent(trimIdRaw) : trimIdRaw) : null;
+    const modelName = modelNameRaw ? (modelNameRaw.includes('%') ? decodeURIComponent(modelNameRaw) : modelNameRaw) : null;
+    const brandName = brandNameRaw ? (brandNameRaw.includes('%') ? decodeURIComponent(brandNameRaw) : brandNameRaw) : null;
+    const baseTrimName = baseTrimNameRaw ? (baseTrimNameRaw.includes('%') ? decodeURIComponent(baseTrimNameRaw) : baseTrimNameRaw) : null;
     
     if (!isAutoSelecting && !carData && (trimId || modelName)) {
       setIsAutoSelecting(true);
@@ -817,19 +867,23 @@ function PersonalQuotePageContent() {
             const trimsData = await trimsRes.json();
             
             if (Array.isArray(trimsData)) {
-              // trimIdParam으로 세부트림 찾기 (여러 방법으로 시도)
+              // trimIdParam으로 세부트림 찾기 (여러 방법으로 시도) - MongoDB ObjectId 포함
               foundTrim = trimsData.find((t: Trim) => 
                 t._id === trimIdParam ||
+                String(t._id) === String(trimIdParam) ||
                 t.trim_name === trimIdParam ||
                 t.trim_name?.includes(trimIdParam) ||
                 t.name === trimIdParam ||
-                String(t._id) === String(trimIdParam)
+                t.trim_id === trimIdParam ||
+                String(t.trim_id) === String(trimIdParam)
               ) || null;
               
               if (foundTrim) {
                 trimIdResult = foundTrim._id || foundTrim.trim_name || foundTrim.name || trimIdParam;
+                console.log("🚗 [findAllIdsFromNames] 세부트림 찾기 성공:", { trimIdParam, foundTrim, trimIdResult });
               } else {
                 // 찾지 못했으면 trimIdParam을 그대로 사용
+                console.warn("🚗 [findAllIdsFromNames] 세부트림 찾기 실패, trimIdParam 사용:", { trimIdParam, trimsCount: trimsData.length });
                 trimIdResult = trimIdParam;
               }
             }
