@@ -321,27 +321,39 @@ pipeline {
                                         }
                                         
                                         def reportTaskContent = readFile(reportTaskFile)
-                                        def ceTaskUrl = reportTaskContent.split('\n').find { it.startsWith('ceTaskUrl=') }?.split('=')[1]
                                         
-                                        if (!ceTaskUrl) {
-                                            error "❌ ceTaskUrl을 찾을 수 없습니다."
+                                        // ceTaskId 직접 추출 (더 안정적)
+                                        def ceTaskId = reportTaskContent.split('\n').find { it.startsWith('ceTaskId=') }?.split('=')[1]?.trim()
+                                        
+                                        // 또는 ceTaskUrl에서 task ID 추출
+                                        if (!ceTaskId) {
+                                            def ceTaskUrl = reportTaskContent.split('\n').find { it.startsWith('ceTaskUrl=') }?.split('=')[1]?.trim()
+                                            if (ceTaskUrl) {
+                                                // URL에서 task ID 추출: http://.../api/ce/task?id=xxxxx
+                                                ceTaskId = ceTaskUrl.split('id=')[1]?.split('&')[0]?.trim()
+                                            }
                                         }
                                         
-                                        echo "📋 Task URL: ${ceTaskUrl}"
+                                        if (!ceTaskId) {
+                                            error "❌ ceTaskId를 찾을 수 없습니다."
+                                        }
+                                        
+                                        echo "📋 Task ID: ${ceTaskId}"
                                         
                                         // SonarQube 서버가 분석을 완료할 때까지 대기
                                         def maxAttempts = 60
                                         def attempt = 0
                                         def qgStatus = null
+                                        def sonarHostUrl = env.SONAR_HOST_URL ?: 'http://13.125.43.164:9000'
                                         
                                         while (attempt < maxAttempts) {
                                             sleep(5) // 5초 대기
                                             attempt++
                                             
-                                            // Task 상태 확인 (jq 또는 grep으로 파싱)
+                                            // Task 상태 확인 (task ID 사용)
                                             def taskStatus = sh(
                                                 script: """
-                                                    TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}')
+                                                    TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${sonarHostUrl}/api/ce/task?id=${ceTaskId}')
                                                     if command -v jq >/dev/null 2>&1; then
                                                         echo "\$TASK_RESPONSE" | jq -r '.task.status' 2>/dev/null || echo ''
                                                     else
@@ -357,7 +369,7 @@ pipeline {
                                                 // analysisId 추출
                                                 def analysisId = sh(
                                                     script: """
-                                                        TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}')
+                                                        TASK_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${sonarHostUrl}/api/ce/task?id=${ceTaskId}')
                                                         if command -v jq >/dev/null 2>&1; then
                                                             echo "\$TASK_RESPONSE" | jq -r '.task.analysisId' 2>/dev/null || echo ''
                                                         else
@@ -369,7 +381,7 @@ pipeline {
                                                 
                                                 if (analysisId && analysisId != 'null' && analysisId != '') {
                                                     // Quality Gate 상태 확인
-                                                    def qgUrl = "${env.SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${analysisId}"
+                                                    def qgUrl = "${sonarHostUrl}/api/qualitygates/project_status?analysisId=${analysisId}"
                                                     qgStatus = sh(
                                                         script: """
                                                             QG_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${qgUrl}')
@@ -397,7 +409,7 @@ pipeline {
                                             // 품질 기준 실패 시 (빨간색 알림)
                                             slackSend(
                                                 color: 'danger',
-                                                message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qgStatus}\n링크: ${env.SONAR_HOST_URL}/dashboard?id=alphacar-frontend"
+                                                message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qgStatus}\n링크: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
                                             )
                                             error "Pipeline aborted due to quality gate failure: ${qgStatus}"
                                         } else {
