@@ -309,6 +309,27 @@ pipeline {
                                         exit \$SCAN_EXIT_CODE
                                     fi
                                 """
+                                
+                                // SonarQube Quality Gate 결과 대기 및 슬랙 알림
+                                echo "⏳ SonarQube Quality Gate 결과 대기 중..."
+                                timeout(time: 5, unit: 'MINUTES') {
+                                    def qg = waitForQualityGate()
+                                    
+                                    if (qg.status != 'OK') {
+                                        // 품질 기준 실패 시 (빨간색 알림)
+                                        slackSend(
+                                            color: 'danger',
+                                            message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qg.status}\n링크: ${env.BUILD_URL}sonarqube"
+                                        )
+                                        error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                                    } else {
+                                        // 품질 기준 통과 시 (초록색 알림)
+                                        slackSend(
+                                            color: 'good',
+                                            message: "✅ *SonarQube 품질 검사 통과*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n이제 ArgoCD 배포를 진행합니다!"
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
