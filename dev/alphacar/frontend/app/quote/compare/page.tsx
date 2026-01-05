@@ -468,32 +468,59 @@ function CompareQuoteContent() {
       const trims = rawVehicleData.trims || [];
 
       if (trims.length > 0) {
-          const decodedTrimId = decodeURIComponent(trimId);
+          const decodedTrimId = trimId.includes('%') ? decodeURIComponent(trimId) : trimId;
           // "Reserve A/T:1" 형식에서 실제 트림 이름만 추출 (":숫자" 제거)
           const trimNameOnly = decodedTrimId.split(':')[0].trim();
 
+          console.log("🚗 [비교 페이지] 트림 찾기:", { trimId, decodedTrimId, trimNameOnly, trimsCount: trims.length, modelName });
+
           // A. trim_name으로 먼저 찾기 (가장 정확한 매칭, 고유성 보장)
           // trim_name이 세부 트림 선택 시 사용된 값이므로 우선 매칭
-          selectedTrim = trims.find((t: any) => t.trim_name === trimId || t.trim_name === decodedTrimId || t.trim_name === trimNameOnly);
+          selectedTrim = trims.find((t: any) => 
+            t.trim_name === trimId || 
+            t.trim_name === decodedTrimId || 
+            t.trim_name === trimNameOnly ||
+            String(t.trim_name) === String(trimId) ||
+            String(t.trim_name) === String(decodedTrimId)
+          ) || null;
 
           // B. name으로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.name === trimId || t.name === decodedTrimId || t.name === trimNameOnly);
+              selectedTrim = trims.find((t: any) => 
+                t.name === trimId || 
+                t.name === decodedTrimId || 
+                t.name === trimNameOnly ||
+                String(t.name) === String(trimId) ||
+                String(t.name) === String(decodedTrimId)
+              ) || null;
           }
 
-          // C. _id로 찾기 (lineup_id일 수 있으므로 보조적으로만 사용)
+          // C. _id로 찾기 (MongoDB ObjectId 포함)
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t._id === trimId || t._id === decodedTrimId);
+              selectedTrim = trims.find((t: any) => 
+                t._id === trimId || 
+                t._id === decodedTrimId ||
+                String(t._id) === String(trimId) ||
+                String(t._id) === String(decodedTrimId)
+              ) || null;
           }
 
           // D. trim_id로 찾기
           if (!selectedTrim) {
-              selectedTrim = trims.find((t: any) => t.trim_id === trimId || t.trim_id === decodedTrimId);
+              selectedTrim = trims.find((t: any) => 
+                t.trim_id === trimId || 
+                t.trim_id === decodedTrimId ||
+                String(t.trim_id) === String(trimId) ||
+                String(t.trim_id) === String(decodedTrimId)
+              ) || null;
           }
 
-          // D. Fallback: 여전히 못 찾았다면 첫 번째 트림을 기본값으로 사용
+          // E. Fallback: 여전히 못 찾았다면 첫 번째 트림을 기본값으로 사용
           if (!selectedTrim) {
+              console.warn("🚗 [비교 페이지] 트림을 찾지 못해 첫 번째 트림 사용:", { trimId, decodedTrimId, trimsCount: trims.length });
               selectedTrim = trims[0];
+          } else {
+              console.log("🚗 [비교 페이지] 트림 찾기 성공:", { trimId, foundTrim: selectedTrim.trim_name || selectedTrim.name });
           }
       }
       
@@ -525,10 +552,12 @@ function CompareQuoteContent() {
 
   useEffect(() => {
     const car1_trimId = searchParams.get("car1_trimId");
+    const car1_modelName = searchParams.get("car1_modelName");
     const car1_options = searchParams.get("car1_options");
 
     if (car1_trimId) {
-      fetchCarDetail(car1_trimId).then((data) => {
+      console.log("🚗 [비교 페이지] car1 데이터 로드:", { car1_trimId, car1_modelName, car1_options });
+      fetchCarDetail(car1_trimId, car1_modelName || undefined).then((data) => {
         if (data) {
           setCarsData(prev => {
             const newCars = [...prev];

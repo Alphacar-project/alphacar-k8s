@@ -153,7 +153,42 @@ function QuoteResultContent() {
         let mergedDetail: CarDetailData;
 
         if (trims.length > 0) {
-            selectedTrim = trims[0];
+            // trimId로 실제 트림 찾기 (여러 방법으로 시도)
+            const decodedTrimId = decodeURIComponent(trimId);
+            const trimNameOnly = decodedTrimId.split(':')[0].trim();
+            
+            // 1. trim_name으로 먼저 찾기 (가장 정확한 매칭)
+            selectedTrim = trims.find((t: TrimData) => 
+              t.trim_name === trimId || 
+              t.trim_name === decodedTrimId || 
+              t.trim_name === trimNameOnly
+            ) || null;
+            
+            // 2. name으로 찾기
+            if (!selectedTrim) {
+              selectedTrim = trims.find((t: TrimData) => 
+                t.name === trimId || 
+                t.name === decodedTrimId || 
+                t.name === trimNameOnly
+              ) || null;
+            }
+            
+            // 3. _id로 찾기
+            if (!selectedTrim) {
+              selectedTrim = trims.find((t: TrimData) => 
+                t._id === trimId || 
+                String(t._id) === String(trimId) ||
+                t._id === decodedTrimId
+              ) || null;
+            }
+            
+            // 4. Fallback: 여전히 못 찾았다면 첫 번째 트림 사용
+            if (!selectedTrim) {
+              console.warn("🚗 [개별견적 결과] 트림을 찾지 못해 첫 번째 트림 사용:", { trimId, decodedTrimId, trimsCount: trims.length });
+              selectedTrim = trims[0];
+            } else {
+              console.log("🚗 [개별견적 결과] 트림 찾기 성공:", { trimId, foundTrim: selectedTrim.trim_name || selectedTrim.name });
+            }
         }
         
         if (selectedTrim) {
@@ -281,12 +316,28 @@ function QuoteResultContent() {
       .filter((o) => o.isSelected)
       .map((o) => o.id);
 
-    const queryString = new URLSearchParams({
-      car1_trimId: trimId || "",
-      car1_options: selectedOptionIds.join(","),
-    }).toString();
+    // 실제 선택된 트림의 이름 사용 (carDetail.name이 선택된 트림명)
+    // trimId가 URL 파라미터로 받은 값이지만, 실제 선택된 트림은 carDetail.name에 있음
+    const actualTrimId = carDetail?.name || trimId || "";
+    
+    console.log("🚗 [비교 견적] 전달 데이터:", { 
+      originalTrimId: trimId, 
+      actualTrimId, 
+      carDetailName: carDetail?.name,
+      modelName 
+    });
 
-    router.push(`/quote/compare?${queryString}`);
+    const queryString = new URLSearchParams({
+      car1_trimId: actualTrimId,
+      car1_options: selectedOptionIds.join(","),
+    });
+    
+    // modelName이 있으면 함께 전달 (비교 페이지에서 정확한 차량 찾기 위해)
+    if (modelName) {
+      queryString.append('car1_modelName', modelName);
+    }
+
+    router.push(`/quote/compare?${queryString.toString()}`);
   };
 
   // 안전한 이미지 경로
