@@ -310,24 +310,83 @@ pipeline {
                                     fi
                                 """
                                 
-                                // SonarQube Quality Gate 결과 대기 및 슬랙 알림 (같은 script 블록 안에서 호출)
+                                // SonarQube Quality Gate 결과 대기 및 슬랙 알림 (SonarQube API 직접 호출)
                                 echo "⏳ SonarQube Quality Gate 결과 대기 중..."
                                 timeout(time: 5, unit: 'MINUTES') {
-                                    def qg = waitForQualityGate()
-                                    
-                                    if (qg.status != 'OK') {
-                                        // 품질 기준 실패 시 (빨간색 알림)
-                                        slackSend(
-                                            color: 'danger',
-                                            message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qg.status}\n링크: ${env.BUILD_URL}sonarqube"
-                                        )
-                                        error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                                    } else {
-                                        // 품질 기준 통과 시 (초록색 알림)
-                                        slackSend(
-                                            color: 'good',
-                                            message: "✅ *SonarQube 품질 검사 통과*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n이제 ArgoCD 배포를 진행합니다!"
-                                        )
+                                    script {
+                                        // report-task.txt 파일에서 task ID 추출
+                                        def reportTaskFile = '.scannerwork/report-task.txt'
+                                        if (!fileExists(reportTaskFile)) {
+                                            error "❌ SonarQube report-task.txt 파일을 찾을 수 없습니다."
+                                        }
+                                        
+                                        def reportTaskContent = readFile(reportTaskFile)
+                                        def ceTaskUrl = reportTaskContent.split('\n').find { it.startsWith('ceTaskUrl=') }?.split('=')[1]
+                                        
+                                        if (!ceTaskUrl) {
+                                            error "❌ ceTaskUrl을 찾을 수 없습니다."
+                                        }
+                                        
+                                        echo "📋 Task URL: ${ceTaskUrl}"
+                                        
+                                        // SonarQube 서버가 분석을 완료할 때까지 대기
+                                        def maxAttempts = 60
+                                        def attempt = 0
+                                        def qgStatus = null
+                                        
+                                        while (attempt < maxAttempts) {
+                                            sleep(5) // 5초 대기
+                                            attempt++
+                                            
+                                            // Task 상태 확인
+                                            def taskResponse = sh(
+                                                script: "curl -s -u \${SONAR_TOKEN}: '${ceTaskUrl}'",
+                                                returnStdout: true
+                                            ).trim()
+                                            
+                                            def taskJson = readJSON text: taskResponse
+                                            def taskStatus = taskJson.task.status
+                                            
+                                            echo "📊 Task 상태 (시도 ${attempt}/${maxAttempts}): ${taskStatus}"
+                                            
+                                            if (taskStatus == 'SUCCESS' || taskStatus == 'FAILED' || taskStatus == 'CANCELED') {
+                                                // Quality Gate 상태 확인
+                                                def analysisId = taskJson.task.analysisId
+                                                if (analysisId) {
+                                                    def qgUrl = "${env.SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${analysisId}"
+                                                    def qgResponse = sh(
+                                                        script: "curl -s -u \${SONAR_TOKEN}: '${qgUrl}'",
+                                                        returnStdout: true
+                                                    ).trim()
+                                                    
+                                                    def qgJson = readJSON text: qgResponse
+                                                    qgStatus = qgJson.projectStatus.status
+                                                    
+                                                    echo "✅ Quality Gate 상태: ${qgStatus}"
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        
+                                        if (qgStatus == null) {
+                                            error "❌ Quality Gate 상태를 가져올 수 없습니다 (타임아웃)"
+                                        }
+                                        
+                                        // 슬랙 알림 전송
+                                        if (qgStatus != 'OK') {
+                                            // 품질 기준 실패 시 (빨간색 알림)
+                                            slackSend(
+                                                color: 'danger',
+                                                message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qgStatus}\n링크: ${env.SONAR_HOST_URL}/dashboard?id=alphacar-frontend"
+                                            )
+                                            error "Pipeline aborted due to quality gate failure: ${qgStatus}"
+                                        } else {
+                                            // 품질 기준 통과 시 (초록색 알림)
+                                            slackSend(
+                                                color: 'good',
+                                                message: "✅ *SonarQube 품질 검사 통과*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n이제 ArgoCD 배포를 진행합니다!"
+                                            )
+                                        }
                                     }
                                 }
                             }
