@@ -234,7 +234,7 @@ pipeline {
                                 " || echo '⚠️ 테스트 실행 실패 - 빌드 계속 진행'
                         """
                         
-                        // 커버리지 리포트 확인 (실패해도 빌드 계속 진행)
+                        // 커버리지 리포트 확인 및 생성 (실패해도 빌드 계속 진행)
                         sh """
                             echo "📊 커버리지 리포트 확인 중..."
                             
@@ -246,7 +246,12 @@ pipeline {
                                     head -30 coverage/lcov.info || echo "파일 읽기 실패"
                                 fi
                             else
-                                echo "⚠️ coverage/lcov.info 파일이 없습니다 (커버리지 0%로 진행)"
+                                echo "⚠️ coverage/lcov.info 파일이 없습니다 - 빈 리포트 생성"
+                                mkdir -p coverage
+                                # 빈 lcov.info 파일 생성 (최소 형식으로 0% 커버리지 표시)
+                                echo "TN:" > coverage/lcov.info
+                                echo "end_of_record" >> coverage/lcov.info
+                                echo "✅ 빈 커버리지 리포트 생성 완료"
                             fi
                             
                             echo "🔍 lib 디렉토리: \$(ls lib/ 2>/dev/null | wc -l) files"
@@ -302,7 +307,8 @@ pipeline {
                                         -Dsonar.sources=lib,app \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.exclusions=**/*.css,**/*.test.*,**/*.spec.*,**/__tests__/**,**/node_modules/**,**/.next/** \\
-                                        -Dsonar.coverage.exclusions=**/* \\
+                                        -Dsonar.coverage.exclusions=**/app/**,**/components/**,**/pages/**,**/*.test.*,**/*.spec.*,**/__tests__/** \\
+                                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                                         -Dsonar.cpd.exclusions=**/* \\
                                         -Dsonar.javascript.analyzer.maxFileSize=500 \\
                                         -Dsonar.token=\${SONAR_TOKEN} \\
