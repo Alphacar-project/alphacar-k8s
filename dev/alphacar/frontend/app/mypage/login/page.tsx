@@ -184,8 +184,6 @@ function LoginContent() {
 
   // ✅ 카카오 로그인
   const handleKakaoLogin = () => {
-    // sonarqube test를 위한 더미 키
-    const REST_API_KEY = process.env.NEXT_PUBLIC_KAKAO_REST_API_KEY || "dummy_kakao_rest_api_key_for_sonarqube_test_12345";
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
 
