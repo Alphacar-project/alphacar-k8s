@@ -11,9 +11,9 @@ export const metadata = {
   title: "ALPHACAR",
   description: "ALPHACAR 차량 가격 비교 서비스",
   icons: {
-    icon: '/favicon.ico',
-    shortcut: '/favicon.ico',
-    apple: '/icon.png',
+    icon: '/alphacar-pabiconedit.png',
+    shortcut: '/alphacar-pabiconedit.png',
+    apple: '/alphacar-pabiconedit.png',
   },
 };
 
