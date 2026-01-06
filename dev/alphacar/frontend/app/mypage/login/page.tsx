@@ -185,9 +185,10 @@ function LoginContent() {
   // ✅ 카카오 로그인
   const handleKakaoLogin = () => {
     // ❌ 시연용: 보안 취약점 - 하드코딩된 카카오 API 키 (SonarQube 감지 목적)
+    // SonarQube가 감지할 수 있도록 하드코딩된 시크릿 키 패턴 사용
     const REST_API_KEY = "342d0463be260fc289926a0c63c4badc";
-    const KAKAO_CLIENT_SECRET = "kakao_secret_key_never_commit_this_12345";
-    const KAKAO_ADMIN_KEY = "kakao_admin_key_for_demo_only";
+    const KAKAO_CLIENT_SECRET = "kakao_client_secret_1234567890abcdefghijklmnopqrstuvwxyz";
+    const KAKAO_ADMIN_KEY = "kakao_admin_key_abcdefghijklmnopqrstuvwxyz1234567890";
     
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
