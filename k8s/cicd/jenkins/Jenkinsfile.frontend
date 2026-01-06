@@ -437,6 +437,25 @@ pipeline {
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
                             // Docker 빌드 (캐시 문제 발생 시 재시도)
+                            // Kubernetes Secret에서 카카오 API 키 가져오기
+                            def kakaoRestApiKey = sh(
+                                script: """
+                                    kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_REST_API_KEY}' | base64 -d || echo ''
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            def kakaoMapApiKey = sh(
+                                script: """
+                                    kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_MAP_API_KEY}' | base64 -d || echo ''
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (!kakaoRestApiKey || !kakaoMapApiKey) {
+                                error "❌ Kubernetes Secret에서 카카오 API 키를 가져올 수 없습니다. Secret이 생성되었는지 확인하세요."
+                            }
+                            
                             def buildSuccess = false
                             try {
                                 // 먼저 캐시를 활용하여 빌드 시도
@@ -445,8 +464,8 @@ pipeline {
                                         -f Dockerfile \\
                                         -t ${imageFullTag} \\
                                         --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
-                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=342d0463be260fc289926a0c63c4badc \\
-                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=c0a234db004e5673a965dcd0025df859 \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=${kakaoRestApiKey} \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=${kakaoMapApiKey} \\
                                         .
                                 """
                                 buildSuccess = true
@@ -458,8 +477,8 @@ pipeline {
                                         -f Dockerfile \\
                                         -t ${imageFullTag} \\
                                         --no-cache \\
-                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=342d0463be260fc289926a0c63c4badc \\
-                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=c0a234db004e5673a965dcd0025df859 \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=${kakaoRestApiKey} \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=${kakaoMapApiKey} \\
                                         .
                                 """
                                 buildSuccess = true
