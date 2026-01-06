@@ -187,6 +187,9 @@ function LoginContent() {
     const REST_API_KEY = "342d0463be260fc289926a0c63c4badc";
     
     // ❌ 시연용: 보안 취약점 - 하드코딩된 카카오 클라이언트 시크릿 (Quality Gate 실패 유발)
+    const KAKAO_CLIENT_SECRET = "kakao_secret_key_never_commit_12345";
+    const KAKAO_ADMIN_KEY = "kakao_admin_key_for_demo";
+    const KAKAO_DATABASE_PASSWORD = "kakao_db_password_12345";
     
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
