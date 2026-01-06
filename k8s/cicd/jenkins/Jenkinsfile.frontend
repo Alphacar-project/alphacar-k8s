@@ -387,7 +387,13 @@ pipeline {
                                             
                                             echo "📊 Task 상태 (시도 ${attempt}/${maxAttempts}): ${taskStatus}"
                                             
-                                            if (taskStatus == 'SUCCESS' || taskStatus == 'FAILED' || taskStatus == 'CANCELED') {
+                                            // Task가 FAILED인 경우 바로 에러 처리
+                                            if (taskStatus == 'FAILED') {
+                                                echo "❌ SonarQube 분석 작업 실패"
+                                                error "SonarQube 분석이 실패했습니다. 소나큐브 대시보드에서 확인하세요: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
+                                            }
+                                            
+                                            if (taskStatus == 'SUCCESS' || taskStatus == 'CANCELED') {
                                                 // analysisId 추출
                                                 def analysisId = sh(
                                                     script: """
