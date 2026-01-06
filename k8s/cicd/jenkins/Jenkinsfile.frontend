@@ -404,17 +404,27 @@ pipeline {
                                                 if (analysisId && analysisId != 'null' && analysisId != '') {
                                                     // Quality Gate 상태 확인
                                                     def qgUrl = "${sonarHostUrl}/api/qualitygates/project_status?analysisId=${analysisId}"
-                                                    qgStatus = sh(
+                                                    def qgResponse = sh(
                                                         script: """
-                                                            QG_RESPONSE=\$(curl -s -u \${SONAR_TOKEN}: '${qgUrl}')
-                                                            if command -v jq >/dev/null 2>&1; then
-                                                                echo "\$QG_RESPONSE" | jq -r '.projectStatus.status' 2>/dev/null || echo ''
-                                                            else
-                                                                echo "\$QG_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo ''
-                                                            fi
+                                                            curl -s -u \${SONAR_TOKEN}: '${qgUrl}'
                                                         """,
                                                         returnStdout: true
                                                     ).trim()
+                                                    
+                                                    qgStatus = sh(
+                                                        script: """
+                                                            echo '${qgResponse}' | jq -r '.projectStatus.status' 2>/dev/null || echo '${qgResponse}' | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo ''
+                                                        """,
+                                                        returnStdout: true
+                                                    ).trim()
+                                                    
+                                                    // Quality Gate 실패 원인 상세 출력
+                                                    if (qgStatus != 'OK') {
+                                                        echo "❌ Quality Gate 실패 상세 정보:"
+                                                        sh """
+                                                            echo '${qgResponse}' | jq -r '.projectStatus.conditions[] | select(.status != "OK") | "  - \(.metricKey): \(.status) (현재: \(.actualValue), 요구: \(.errorThreshold))"' 2>/dev/null || echo '상세 정보 확인 불가'
+                                                        """
+                                                    }
                                                     
                                                     echo "✅ Quality Gate 상태: ${qgStatus}"
                                                     break
