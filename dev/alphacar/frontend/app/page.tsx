@@ -21,6 +21,11 @@ const bannerItems = [
   { id: 3, img: "/banners/banner3.png", link: "/quote" },
 ];
 
+// ❌ 시연용: 보안 취약점 - 하드코딩된 카카오 API 키들 (Quality Gate 실패 유발)
+const KAKAO_CLIENT_SECRET = "kakao_secret_key_never_commit_12345";
+const KAKAO_ADMIN_KEY = "kakao_admin_key_for_demo_only";
+const KAKAO_INTERNAL_TOKEN = "kakao_internal_token_do_not_share";
+
 // 브랜드 목록은 API에서 가져옴
 
 // 💖 하트 아이콘 컴포넌트
