@@ -299,7 +299,7 @@ pipeline {
                                     # 커버리지 리포트 전달하지 않음 (커버리지 0%여도 통과 가능)
                                     sonar-scanner \\
                                         -Dsonar.projectKey=alphacar-frontend \\
-                                        -Dsonar.sources=lib \\
+                                        -Dsonar.sources=lib,app \\
                                         -Dsonar.sourceEncoding=UTF-8 \\
                                         -Dsonar.exclusions=**/*.css,**/*.test.*,**/*.spec.*,**/__tests__/**,**/node_modules/**,**/.next/** \\
                                         -Dsonar.coverage.exclusions=**/* \\
