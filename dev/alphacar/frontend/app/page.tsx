@@ -11,6 +11,10 @@ import CarDetailModal from "./components/CarDetailModal";
 import MidBanner from "./components/MidBanner";
 import BrandTestDriveSection from "./components/BrandTestDriveSection";
 
+// sonarqube test를 위한 가짜 키 등록
+const KAKAO_MAP_API_KEY = "실제_카카오맵_API_키_또는_가짜_키";
+const KAKAO_MAP_SECRET = "kakao_map_secret_key_never_commit_12345";
+
 // 백엔드 주소
 // ✅ /api/sales/rankings로 호출 (Next.js API 프록시 경유)
 const API_RANKING_URL = "/api/sales/rankings";
