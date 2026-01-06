@@ -18,89 +18,12 @@ pipeline {
         stage('0. Check Changes') {
             steps {
                 script {
-                    // 디스크 공간 확인 및 정리 (체크아웃 전에 실행 - 강화 버전)
+                    // 디스크 공간 확인만 수행 (정리는 별도 스케줄러에서 처리)
                     sh """
                         echo "📊 디스크 사용량 확인:"
-                        df -h
-                        
-                        # 디스크 사용률 확인
                         USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
                         echo "💾 디스크 사용률: \${USAGE}%"
-                        
-                        # 디스크 사용률이 50% 이상이면 즉시 정리 시작 (더 적극적으로)
-                        if [ \${USAGE} -gt 50 ]; then
-                            echo "⚠️ 경고: 디스크 사용률이 \${USAGE}%입니다. 즉시 리소스 정리 시작..."
-                            
-                            # 1. Docker 리소스 전면 정리 (가장 먼저)
-                            echo "🧹 Docker 리소스 전면 정리 중..."
-                            docker system prune -a -f --volumes 2>/dev/null || true
-                            docker builder prune -a -f 2>/dev/null || true
-                            docker image prune -a -f 2>/dev/null || true
-                            docker container prune -f 2>/dev/null || true
-                            docker volume prune -f 2>/dev/null || true
-                            docker network prune -f 2>/dev/null || true
-                            
-                            # 2. 오래된 Jenkins 워크스페이스 정리 (3일 이상 된 것 - 더 적극적으로)
-                            echo "🧹 오래된 워크스페이스 정리 중..."
-                            if [ -d /var/lib/jenkins/workspace ]; then
-                                find /var/lib/jenkins/workspace -mindepth 1 -maxdepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null || true
-                            fi
-                            
-                            # 3. Jenkins 빌드 아티팩트 정리
-                            echo "🧹 Jenkins 빌드 아티팩트 정리 중..."
-                            if [ -d /var/lib/jenkins/jobs ]; then
-                                find /var/lib/jenkins/jobs -name "builds" -type d -exec find {} -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + \\; 2>/dev/null || true
-                            fi
-                            
-                            # 4. Git 캐시 정리
-                            echo "🧹 Git 캐시 정리 중..."
-                            find /var/lib/jenkins -name ".git" -type d -exec rm -rf {}/objects/*/pack-*.pack 2>/dev/null \\; || true
-                            
-                            # 5. 임시 파일 정리
-                            echo "🧹 임시 파일 정리 중..."
-                            find /tmp -type f -mtime +1 -delete 2>/dev/null || true
-                            find /var/tmp -type f -mtime +1 -delete 2>/dev/null || true
-                            
-                            # 6. 큰 로그 파일 정리 (50MB 이상인 로그 파일)
-                            echo "🧹 큰 로그 파일 정리 중..."
-                            find /var/log -type f -size +50M -delete 2>/dev/null || true
-                            
-                            echo "✅ 정리 완료. 디스크 사용량 재확인:"
-                            df -h
-                        fi
-                        
-                        # 여전히 디스크 공간이 부족하면 강제 정리
-                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
-                        if [ \${USAGE} -gt 70 ]; then
-                            echo "⚠️ 심각: 디스크 사용률이 여전히 \${USAGE}%입니다. 강제 정리 중..."
-                            
-                            # 모든 중지된 컨테이너 강제 삭제
-                            docker ps -aq --filter "status=exited" 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true
-                            
-                            # 사용하지 않는 이미지 강제 삭제
-                            docker images -q --filter "dangling=true" 2>/dev/null | xargs -r docker rmi -f 2>/dev/null || true
-                            
-                            # 1일 이상 된 워크스페이스 정리 (더 적극적으로)
-                            if [ -d /var/lib/jenkins/workspace ]; then
-                                find /var/lib/jenkins/workspace -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} + 2>/dev/null || true
-                            fi
-                            
-                            # Jenkins 빌드 히스토리 정리 (최근 5개만 유지)
-                            if [ -d /var/lib/jenkins/jobs ]; then
-                                find /var/lib/jenkins/jobs -name "builds" -type d | while read builds_dir; do
-                                    find "\${builds_dir}" -mindepth 1 -maxdepth 1 -type d -name "[0-9]*" | sort -rn | tail -n +6 | xargs -r rm -rf 2>/dev/null || true
-                                done
-                            fi
-                            
-                            echo "✅ 강제 정리 완료. 디스크 사용량 최종 확인:"
-                            df -h
-                        fi
-                        
-                        # 최종 확인 - 여전히 부족하면 경고
-                        USAGE=\$(df / | tail -1 | awk '{print \$5}' | sed 's/%//')
-                        if [ \${USAGE} -gt 90 ]; then
-                            echo "❌ 경고: 디스크 사용률이 여전히 \${USAGE}%입니다. 빌드가 실패할 수 있습니다."
-                        fi
+                        # 디스크 정리는 별도 스케줄러에서 처리
                     """
                     cleanWs()
                     checkout scm
@@ -439,23 +362,40 @@ pipeline {
                                         }
                                         
                                         if (qgStatus == null) {
+                                            // 타임아웃인 경우에도 Slack 알림 전송
+                                            try {
+                                                slackSend(
+                                                    color: 'warning',
+                                                    message: "⚠️ *SonarQube Quality Gate 상태 확인 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n타임아웃 발생\n링크: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
+                                                )
+                                            } catch (Exception e) {
+                                                echo "⚠️ Slack 알림 전송 실패: ${e.getMessage()}"
+                                            }
                                             error "❌ Quality Gate 상태를 가져올 수 없습니다 (타임아웃)"
                                         }
                                         
                                         // 슬랙 알림 전송
-                                        if (qgStatus != 'OK') {
-                                            // 품질 기준 실패 시 (빨간색 알림)
-                                            slackSend(
-                                                color: 'danger',
-                                                message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qgStatus}\n링크: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
-                                            )
-                                            error "Pipeline aborted due to quality gate failure: ${qgStatus}"
-                                        } else {
-                                            // 품질 기준 통과 시 (초록색 알림)
-                                            slackSend(
-                                                color: 'good',
-                                                message: "✅ *SonarQube 품질 검사 통과*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n이제 ArgoCD 배포를 진행합니다!"
-                                            )
+                                        try {
+                                            if (qgStatus != 'OK') {
+                                                // 품질 기준 실패 시 (빨간색 알림)
+                                                slackSend(
+                                                    color: 'danger',
+                                                    message: "❌ *SonarQube 품질 검사 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n결과: ${qgStatus}\n링크: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
+                                                )
+                                                error "Pipeline aborted due to quality gate failure: ${qgStatus}"
+                                            } else {
+                                                // 품질 기준 통과 시 (초록색 알림)
+                                                slackSend(
+                                                    color: 'good',
+                                                    message: "✅ *SonarQube 품질 검사 통과*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n이제 ArgoCD 배포를 진행합니다!"
+                                                )
+                                            }
+                                        } catch (Exception e) {
+                                            echo "⚠️ Slack 알림 전송 실패: ${e.getMessage()}"
+                                            // Slack 알림 실패해도 빌드는 계속 진행
+                                            if (qgStatus != 'OK') {
+                                                error "Pipeline aborted due to quality gate failure: ${qgStatus}"
+                                            }
                                         }
                                     }
                                 }
