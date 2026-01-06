@@ -310,9 +310,17 @@ pipeline {
                                             
                                             echo "📊 Task 상태 (시도 ${attempt}/${maxAttempts}): ${taskStatus}"
                                             
-                                            // Task가 FAILED인 경우 바로 에러 처리
+                                            // Task가 FAILED인 경우 Slack 알림 후 에러 처리
                                             if (taskStatus == 'FAILED') {
                                                 echo "❌ SonarQube 분석 작업 실패"
+                                                try {
+                                                    slackSend(
+                                                        color: 'danger',
+                                                        message: "❌ *SonarQube 분석 작업 실패*\n프로젝트: ${env.JOB_NAME} [${env.BUILD_NUMBER}]\n소나큐브 대시보드에서 확인하세요.\n링크: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
+                                                    )
+                                                } catch (Exception e) {
+                                                    echo "⚠️ Slack 알림 전송 실패: ${e.getMessage()}"
+                                                }
                                                 error "SonarQube 분석이 실패했습니다. 소나큐브 대시보드에서 확인하세요: ${sonarHostUrl}/dashboard?id=alphacar-frontend"
                                             }
                                             
