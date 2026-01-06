@@ -10,6 +10,11 @@ import LoginStatus from "./components/LoginStatus";
 export const metadata = {
   title: "ALPHACAR",
   description: "ALPHACAR 차량 가격 비교 서비스",
+  icons: {
+    icon: '/icon.png',
+    shortcut: '/icon.png',
+    apple: '/icon.png',
+  },
 };
 
 export default function RootLayout({ children }) {
