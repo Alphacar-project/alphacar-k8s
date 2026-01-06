@@ -16,7 +16,7 @@ import BrandTestDriveSection from "./components/BrandTestDriveSection";
 const API_RANKING_URL = "/api/sales/rankings";
 
 const bannerItems = [
-  { id: 1, img: "/banners/banner1.png", link: "/cashback" },
+  { id: 1, img: "/banners/christmas-banner.png", link: "/cashback" },
   { id: 2, img: "/banners/banner2.png", link: "/benefit" },
   { id: 3, img: "/banners/banner3.png", link: "/quote" },
 ];
@@ -493,8 +493,8 @@ function HomePageContent() {
         </section>
 
         <section style={{ margin: "50px auto 40px", padding: "0 40px", textAlign: "center" }}>
-          <h2 style={{ fontSize: "30px", fontWeight: "700", color: "#2563eb", marginBottom: "10px" }}>고객님, 어떤 차를 찾으시나요? alphacar</h2>
-          <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "22px" }}>차종이나 모델명으로 검색할 수 있어요!![ alphacar</p>
+          <h2 style={{ fontSize: "30px", fontWeight: "700", color: "#2563eb", marginBottom: "10px" }}>고객님, 어떤 차를 찾으시나요?</h2>
+          <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "22px" }}>차종이나 모델명으로 검색할 수 있어요!!</p>
           <form onSubmit={handleSearchSubmit} style={{ display: "inline-flex", alignItems: "center", gap: "12px" }}>
             <div style={{ position: "relative", width: "720px", maxWidth: "90vw" }}>
               <input type="text" placeholder="고객님 어떤 차를 찾으세요? " value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: "100%", height: "56px", padding: "0 22px", borderRadius: "999px", border: "1px solid #e5e7eb", fontSize: "17px", outline: "none" }} />
