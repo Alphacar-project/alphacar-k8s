@@ -184,7 +184,12 @@ function LoginContent() {
 
   // ✅ 카카오 로그인
   const handleKakaoLogin = () => {
-    const REST_API_KEY = "342d0463be260fc289926a0c63c4badc";
+    // 환경변수에서 카카오 로그인 API 키 가져오기
+    const REST_API_KEY = process.env.NEXT_PUBLIC_KAKAO_REST_API_KEY;
+    if (!REST_API_KEY) {
+      console.error("카카오 로그인 API 키가 설정되지 않았습니다.");
+      return;
+    }
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
 
