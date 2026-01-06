@@ -153,11 +153,11 @@ export default function DriveCoursePage() {
       existingScript.remove();
     }
 
-    // 카카오맵 API 키 (환경변수 또는 직접 설정)
-    const KAKAO_MAP_API_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY || "c0a234db004e5673a965dcd0025df859";
+    // 카카오맵 API 키 (환경변수에서만 가져오기)
+    const KAKAO_MAP_API_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY;
 
     // API 키 확인
-    if (!KAKAO_MAP_API_KEY || KAKAO_MAP_API_KEY === "YOUR_KAKAO_MAP_API_KEY") {
+    if (!KAKAO_MAP_API_KEY) {
       console.error("카카오맵 API 키가 설정되지 않았습니다.");
       return;
     }

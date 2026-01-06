@@ -11,8 +11,6 @@ import CarDetailModal from "./components/CarDetailModal";
 import MidBanner from "./components/MidBanner";
 import BrandTestDriveSection from "./components/BrandTestDriveSection";
 
-// sonarqube test를 위한 가짜 키 등록
-
 // 백엔드 주소
 // ✅ /api/sales/rankings로 호출 (Next.js API 프록시 경유)
 const API_RANKING_URL = "/api/sales/rankings";
