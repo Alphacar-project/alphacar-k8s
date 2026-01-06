@@ -1,0 +1,21 @@
+# terraform.tfvars.example
+# Copy this file to terraform.tfvars and update with your values
+
+# Region
+region = "ap-northeast-2"
+
+# EC2
+bastion_ami_id = "ami-0b818a04bc9c2133c"  # Amazon Linux 2023
+jenkins_ami_id = "ami-0a71e3eb8b23101ed"  # Amazon Linux 2023
+key_pair_name  = "dz3-kdh"  # Update with your key pair
+
+# ALB DNS (from Kubernetes ALB Ingress Controller)
+main_alb_dns_name   = "k8s-alphacarmainalb-4c78644449-1674282483.ap-northeast-2.elb.amazonaws.com"
+main_alb_zone_id    = "ZWKZPGTI48KDX"
+monitor_alb_dns_name = "k8s-apcobsvn-grafanai-521ad18beb-138701628.ap-northeast-2.elb.amazonaws.com"
+
+# ECR Repositories (optional - defaults are set in variables.tf)
+# ecr_repository_names = [...]
+
+# Domain (테스트 환경에서는 kimdohun.cloud 사용)
+# domain_name = "kimdohun.cloud"  # 테스트 환경용

@@ -437,24 +437,9 @@ pipeline {
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
                             // Docker 빌드 (캐시 문제 발생 시 재시도)
-                            // Kubernetes Secret에서 카카오 API 키 가져오기
-                            def kakaoRestApiKey = sh(
-                                script: """
-                                    kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_REST_API_KEY}' | base64 -d || echo ''
-                                """,
-                                returnStdout: true
-                            ).trim()
-                            
-                            def kakaoMapApiKey = sh(
-                                script: """
-                                    kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_MAP_API_KEY}' | base64 -d || echo ''
-                                """,
-                                returnStdout: true
-                            ).trim()
-                            
-                            if (!kakaoRestApiKey || !kakaoMapApiKey) {
-                                error "❌ Kubernetes Secret에서 카카오 API 키를 가져올 수 없습니다. Secret이 생성되었는지 확인하세요."
-                            }
+                            // 시연용: 더미 카카오 API 키 사용 (SonarQube 테스트용)
+                            def kakaoRestApiKey = "dummy_kakao_rest_api_key_for_sonarqube_test_12345"
+                            def kakaoMapApiKey = "dummy_kakao_map_api_key_for_sonarqube_test_12345"
                             
                             def buildSuccess = false
                             try {

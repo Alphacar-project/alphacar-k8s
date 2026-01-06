@@ -18,7 +18,6 @@ const bedrockModelId = process.env.BEDROCK_LLM_MODEL_ID || 'us.meta.llama3-3-70b
 const bedrockGuardrailId = process.env.BEDROCK_GUARDRAIL_ID || '';
 const bedrockGuardrailVersion = process.env.BEDROCK_GUARDRAIL_VERSION || 'DRAFT';
 
-
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -2184,6 +2183,10 @@ const server = http.createServer(async (req, res) => {
   } else if (req.url === '/api/analyze/logs' && req.method === 'POST') {
     const body = await parseBody(req);
     const level = body.level || 'error';
+    const podName = body.podName;
+    const namespace = body.namespace;
+    const startTime = body.startTime || Date.now() - 3600000;
+    const endTime = body.endTime || Date.now();
 
     // 시간 범위 계산
     let hours = 1;
@@ -2194,37 +2197,150 @@ const server = http.createServer(async (req, res) => {
       hours = parseFloat(body.hours);
     }
 
-    // 실제 로그 데이터 수집 시도 (현재는 샘플 데이터, 향후 Loki/Elasticsearch 연동 필요)
-    // TODO: 실제 로그 시스템(Loki/Elasticsearch)에서 로그를 가져오도록 수정
     const logCountText = hours >= 24 ? Math.floor(hours / 24) + '일' : hours + '시간';
+    
+    let logData = [];
+    let logCount = 0;
+    let useRealData = false;
 
-    // 실제 로그 패턴 시뮬레이션 (시간에 따라 변하는 데이터)
-    // 시간대별 로그 분포 생성 (오전/오후/밤 패턴 반영)
-    const now = new Date();
-    const hourOfDay = now.getHours();
-    let baseLogCount = 0;
+    // Loki에서 실제 로그 데이터 가져오기 시도
+    try {
+      const lokiUrl = 'http://loki.apc-obsv-ns.svc.cluster.local:3100';
+      
+      // LogQL 쿼리 구성
+      let logqlQuery = `{level="${level}"}`;
+      if (podName) {
+        logqlQuery = `{pod="${podName}", level="${level}"}`;
+      }
+      if (namespace) {
+        logqlQuery = `{namespace="${namespace}", level="${level}"}`;
+      }
+      if (podName && namespace) {
+        logqlQuery = `{pod="${podName}", namespace="${namespace}", level="${level}"}`;
+      }
 
-    // 시간대별 기본 로그 개수 (오전 9-12시, 오후 2-6시에 많음)
-    if (hourOfDay >= 9 && hourOfDay < 12) {
-      baseLogCount = 25; // 오전 피크
-    } else if (hourOfDay >= 14 && hourOfDay < 18) {
-      baseLogCount = 30; // 오후 피크
-    } else if (hourOfDay >= 0 && hourOfDay < 6) {
-      baseLogCount = 5; // 새벽 최소
-    } else {
-      baseLogCount = 15; // 일반 시간대
+      // Loki Query Range API 호출
+      const startNs = startTime * 1000000; // milliseconds to nanoseconds
+      const endNs = endTime * 1000000;
+      const step = Math.max(60, Math.floor((endTime - startTime) / 1000 / 60)); // 최소 60초, 최대 60개 포인트
+      
+      const queryUrl = `${lokiUrl}/loki/api/v1/query_range?query=${encodeURIComponent(`sum(count_over_time(${logqlQuery}[1m])) by (pod)`)}&start=${startNs}&end=${endNs}&step=${step}s&limit=1000`;
+      
+      console.log('Querying Loki:', queryUrl);
+
+      const lokiResponse = await new Promise((resolve, reject) => {
+        const req = http.get(queryUrl, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              if (res.statusCode === 200) {
+                resolve(JSON.parse(data));
+              } else {
+                reject(new Error(`Loki API error: ${res.statusCode}`));
+              }
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(10000, () => {
+          req.destroy();
+          reject(new Error('Loki query timeout'));
+        });
+      });
+
+      // Loki 응답에서 로그 데이터 추출
+      if (lokiResponse.data && lokiResponse.data.result && lokiResponse.data.result.length > 0) {
+        useRealData = true;
+        const timeSeriesMap = {};
+
+        // 각 시리즈의 데이터 포인트 집계
+        for (const result of lokiResponse.data.result) {
+          if (result.values && result.values.length > 0) {
+            for (const [timestamp, value] of result.values) {
+              const timeKey = Math.floor(parseInt(timestamp) / 1000000000); // nanoseconds to seconds, rounded
+              if (!timeSeriesMap[timeKey]) {
+                timeSeriesMap[timeKey] = 0;
+              }
+              timeSeriesMap[timeKey] += parseInt(value) || 0;
+            }
+          }
+        }
+
+        // 시간순으로 정렬하고 logData 생성
+        logData = Object.entries(timeSeriesMap)
+          .sort(([a], [b]) => parseInt(a) - parseInt(b))
+          .map(([timestamp, count]) => ({
+            timestamp: parseInt(timestamp) * 1000, // seconds to milliseconds
+            count: count
+          }));
+
+        logCount = logData.reduce((sum, d) => sum + d.count, 0);
+        console.log(`Retrieved ${logData.length} data points from Loki, total logs: ${logCount}`);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch logs from Loki, using fallback data:', err.message);
     }
 
-    // 레벨별 가중치
-    const levelWeights = {
-      'error': 0.1,
-      'warning': 0.3,
-      'info': 0.5,
-      'debug': 0.1
-    };
+    // Loki에서 데이터를 가져오지 못한 경우 fallback 샘플 데이터 사용
+    if (!useRealData || logData.length === 0) {
+      console.log('Using fallback sample log data');
 
-    const weight = levelWeights[level.toLowerCase()] || 0.2;
-    const logCount = Math.floor(baseLogCount * hours * weight * (1 + Math.random() * 0.3)); // 약 30% 변동
+      // 실제 로그 패턴 시뮬레이션 (시간에 따라 변하는 데이터)
+      // 시간대별 로그 분포 생성 (오전/오후/밤 패턴 반영)
+      const now = new Date();
+      const hourOfDay = now.getHours();
+      let baseLogCount = 0;
+
+      // 시간대별 기본 로그 개수 (오전 9-12시, 오후 2-6시에 많음)
+      if (hourOfDay >= 9 && hourOfDay < 12) {
+        baseLogCount = 25; // 오전 피크
+      } else if (hourOfDay >= 14 && hourOfDay < 18) {
+        baseLogCount = 30; // 오후 피크
+      } else if (hourOfDay >= 0 && hourOfDay < 6) {
+        baseLogCount = 5; // 새벽 최소
+      } else {
+        baseLogCount = 15; // 일반 시간대
+      }
+
+      // 레벨별 가중치
+      const levelWeights = {
+        'error': 0.1,
+        'warning': 0.3,
+        'info': 0.5,
+        'debug': 0.1
+      };
+
+      const weight = levelWeights[level.toLowerCase()] || 0.2;
+      logCount = Math.floor(baseLogCount * hours * weight * (1 + Math.random() * 0.3)); // 약 30% 변동
+
+      // 시간별 분포 데이터 생성 (그래프용)
+      const intervalMs = Math.max(60000, Math.floor((endTime - startTime) / 60)); // 최소 1분, 최대 60개 포인트
+      logData = [];
+      for (let t = startTime; t <= endTime; t += intervalMs) {
+        const hourOfTime = new Date(t).getHours();
+        let countAtTime = baseLogCount * weight;
+        
+        // 시간대별 패턴 적용
+        if (hourOfTime >= 9 && hourOfTime < 12) {
+          countAtTime *= 1.3;
+        } else if (hourOfTime >= 14 && hourOfTime < 18) {
+          countAtTime *= 1.5;
+        } else if (hourOfTime >= 0 && hourOfTime < 6) {
+          countAtTime *= 0.7;
+        }
+        
+        // 랜덤 변동 추가
+        countAtTime *= (0.7 + Math.random() * 0.6);
+        
+        logData.push({
+          timestamp: t,
+          count: Math.max(0, Math.floor(countAtTime))
+        });
+      }
+    }
 
     // Bedrock을 사용한 로그 분석
     let analysisText = '';
@@ -2298,6 +2414,7 @@ const server = http.createServer(async (req, res) => {
       analysis: analysisText,
       logCount: logCount,
       hours: hours,
+      logData: logData,
       timestamp: new Date().toISOString()
     }));
   } else if (req.url === '/api/analyze/pod' && req.method === 'POST') {
@@ -2610,68 +2727,149 @@ ${podInfoText}
   } else if (req.url === '/api/analyze/traces' && req.method === 'POST') {
     const body = await parseBody(req);
     const service = body.service || 'all';
+    const startTime = body.startTime || Date.now() - 3600000;
+    const endTime = body.endTime || Date.now();
 
-    // 실제 트레이스 데이터 수집 시도 (현재는 동적 샘플 데이터, 향후 Jaeger/Tempo 연동 필요)
-    // TODO: 실제 트레이스 시스템(Jaeger/Tempo)에서 트레이스를 가져오도록 수정
+    let traceData = [];
+    let useRealData = false;
 
-    // 시간대와 서비스별로 변하는 트레이스 데이터 생성
-    const now = new Date();
-    const hourOfDay = now.getHours();
-    const dayOfWeek = now.getDay();
-
-    // 시간대별 부하 패턴 (오전/오후 피크 시간대)
-    let loadMultiplier = 1.0;
-    if (hourOfDay >= 9 && hourOfDay < 12) {
-      loadMultiplier = 1.3; // 오전 피크
-    } else if (hourOfDay >= 14 && hourOfDay < 18) {
-      loadMultiplier = 1.5; // 오후 피크
-    } else if (hourOfDay >= 0 && hourOfDay < 6) {
-      loadMultiplier = 0.7; // 새벽 최소
-    }
-
-    // 요일별 패턴 (평일/주말)
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      loadMultiplier *= 1.2; // 평일 더 높음
-    }
-
-    // 서비스별 기본 응답 시간 (ms)
-    const baseDurations = {
-      'backend': 100,
-      'frontend': 40,
-      'database': 25,
-      'cache': 12,
-      'aichat-backend': 150,
-      'mypage-backend': 80,
-      'nginx': 5
-    };
-
-    // 실제 서비스 목록 (필터링)
-    const allServices = Object.keys(baseDurations);
-    let selectedServices = allServices;
-
-    if (service !== 'all') {
-      selectedServices = allServices.filter(s => s.includes(service));
-      if (selectedServices.length === 0) {
-        selectedServices = [service]; // 없는 서비스면 기본값 사용
+    // Tempo에서 실제 트레이스 데이터 가져오기 시도
+    try {
+      const tempoUrl = 'http://tempo.apc-obsv-ns.svc.cluster.local:3200';
+      const searchParams = new URLSearchParams({
+        start: Math.floor(startTime / 1000).toString(),
+        end: Math.floor(endTime / 1000).toString(),
+        limit: '100'
+      });
+      
+      if (service !== 'all') {
+        searchParams.append('tags', `service.name=${service}`);
       }
+
+      const searchUrl = `${tempoUrl}/api/search?${searchParams.toString()}`;
+      console.log('Querying Tempo:', searchUrl);
+
+      const tempoResponse = await new Promise((resolve, reject) => {
+        const req = http.get(searchUrl, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              if (res.statusCode === 200) {
+                resolve(JSON.parse(data));
+              } else {
+                reject(new Error(`Tempo API error: ${res.statusCode}`));
+              }
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(5000, () => {
+          req.destroy();
+          reject(new Error('Tempo query timeout'));
+        });
+      });
+
+      // Tempo 응답에서 트레이스 데이터 추출
+      if (tempoResponse.traces && tempoResponse.traces.length > 0) {
+        useRealData = true;
+        const serviceDurations = {};
+
+        // 각 트레이스의 서비스별 duration 집계
+        // Tempo search API 응답 형식: { traceID, rootServiceName, rootTraceName, startTimeUnixNano, durationMs }
+        for (const trace of tempoResponse.traces) {
+          const svcName = trace.rootServiceName || 'unknown';
+          const durationMs = trace.durationMs || 0;
+
+          if (!serviceDurations[svcName]) {
+            serviceDurations[svcName] = { total: 0, count: 0 };
+          }
+          serviceDurations[svcName].total += durationMs;
+          serviceDurations[svcName].count += 1;
+        }
+
+        // 평균 duration 계산
+        traceData = Object.entries(serviceDurations).map(([svcName, stats]) => ({
+          service: svcName,
+          duration: Math.round(stats.total / stats.count)
+        }));
+
+        // 서비스 필터링
+        if (service !== 'all') {
+          traceData = traceData.filter(t => t.service.toLowerCase().includes(service.toLowerCase()));
+        }
+
+        console.log(`Retrieved ${traceData.length} services from Tempo:`, traceData.map(t => t.service).join(', '));
+      }
+    } catch (err) {
+      console.warn('Failed to fetch traces from Tempo, using fallback data:', err.message);
     }
 
-    // 동적 트레이스 데이터 생성 (변동성 추가)
-    const traceData = selectedServices.map(svc => {
-      const base = baseDurations[svc] || 50;
-      // 부하에 따라 응답 시간 증가 + 랜덤 변동 (±20%)
-      const duration = Math.round(base * loadMultiplier * (0.8 + Math.random() * 0.4));
-      return { service: svc, duration: duration };
-    });
+    // Tempo에서 데이터를 가져오지 못한 경우 fallback 샘플 데이터 사용
+    if (!useRealData || traceData.length === 0) {
+      console.log('Using fallback sample trace data');
+      
+      // 시간대와 서비스별로 변하는 트레이스 데이터 생성
+      const now = new Date();
+      const hourOfDay = now.getHours();
+      const dayOfWeek = now.getDay();
 
-    // 서비스가 없으면 기본 샘플 데이터
-    if (traceData.length === 0) {
-      traceData.push(
-        { service: 'backend', duration: Math.round(100 * loadMultiplier) },
-        { service: 'frontend', duration: Math.round(40 * loadMultiplier) },
-        { service: 'database', duration: Math.round(25 * loadMultiplier) },
-        { service: 'cache', duration: Math.round(12 * loadMultiplier) }
-      );
+      // 시간대별 부하 패턴 (오전/오후 피크 시간대)
+      let loadMultiplier = 1.0;
+      if (hourOfDay >= 9 && hourOfDay < 12) {
+        loadMultiplier = 1.3; // 오전 피크
+      } else if (hourOfDay >= 14 && hourOfDay < 18) {
+        loadMultiplier = 1.5; // 오후 피크
+      } else if (hourOfDay >= 0 && hourOfDay < 6) {
+        loadMultiplier = 0.7; // 새벽 최소
+      }
+
+      // 요일별 패턴 (평일/주말)
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        loadMultiplier *= 1.2; // 평일 더 높음
+      }
+
+      // 서비스별 기본 응답 시간 (ms)
+      const baseDurations = {
+        'backend': 100,
+        'frontend': 40,
+        'database': 25,
+        'cache': 12,
+        'aichat-backend': 150,
+        'mypage-backend': 80,
+        'nginx': 5
+      };
+
+      // 실제 서비스 목록 (필터링)
+      const allServices = Object.keys(baseDurations);
+      let selectedServices = allServices;
+
+      if (service !== 'all') {
+        selectedServices = allServices.filter(s => s.includes(service));
+        if (selectedServices.length === 0) {
+          selectedServices = [service]; // 없는 서비스면 기본값 사용
+        }
+      }
+
+      // 동적 트레이스 데이터 생성 (변동성 추가)
+      traceData = selectedServices.map(svc => {
+        const base = baseDurations[svc] || 50;
+        // 부하에 따라 응답 시간 증가 + 랜덤 변동 (±20%)
+        const duration = Math.round(base * loadMultiplier * (0.8 + Math.random() * 0.4));
+        return { service: svc, duration: duration };
+      });
+
+      // 서비스가 없으면 기본 샘플 데이터
+      if (traceData.length === 0) {
+        traceData.push(
+          { service: 'backend', duration: Math.round(100 * loadMultiplier) },
+          { service: 'frontend', duration: Math.round(40 * loadMultiplier) },
+          { service: 'database', duration: Math.round(25 * loadMultiplier) },
+          { service: 'cache', duration: Math.round(12 * loadMultiplier) }
+        );
+      }
     }
 
     // 평균 응답 시간 계산
