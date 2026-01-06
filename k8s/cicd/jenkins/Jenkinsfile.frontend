@@ -26,7 +26,17 @@ pipeline {
                         # 디스크 정리는 별도 스케줄러에서 처리
                     """
                     cleanWs()
-                    checkout scm
+                    
+                    // Git 체크아웃 재시도 로직
+                    retry(3) {
+                        try {
+                            checkout scm
+                        } catch (Exception e) {
+                            echo "⚠️ Git 체크아웃 실패, 재시도 중... ${e.getMessage()}"
+                            sleep(time: 2, unit: 'SECONDS')
+                            throw e
+                        }
+                    }
                     
                     echo "🔍 변경된 파일 확인 중..."
                     
