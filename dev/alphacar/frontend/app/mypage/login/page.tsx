@@ -185,9 +185,6 @@ function LoginContent() {
   // ✅ 카카오 로그인
   const handleKakaoLogin = () => {
     const REST_API_KEY = "342d0463be260fc289926a0c63c4badc";
-    
-    // ❌ 시연용: 보안 취약점 - 하드코딩된 카카오 클라이언트 시크릿 (Quality Gate 실패 유발)
-    
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
 
