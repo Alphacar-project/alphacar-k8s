@@ -422,7 +422,7 @@ pipeline {
                                                     if (qgStatus != 'OK') {
                                                         echo "❌ Quality Gate 실패 상세 정보:"
                                                         sh """
-                                                            echo '${qgResponse}' | jq -r '.projectStatus.conditions[] | select(.status != "OK") | "  - \(.metricKey): \(.status) (현재: \(.actualValue), 요구: \(.errorThreshold))"' 2>/dev/null || echo '상세 정보 확인 불가'
+                                                            echo '${qgResponse}' | jq -r '.projectStatus.conditions[] | select(.status != "OK") | "  - " + .metricKey + ": " + .status + " (현재: " + (.actualValue // "N/A") + ", 요구: " + (.errorThreshold // "N/A") + ")"' 2>/dev/null || echo '상세 정보 확인 불가'
                                                         """
                                                     }
                                                     
