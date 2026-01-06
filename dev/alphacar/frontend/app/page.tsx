@@ -16,7 +16,7 @@ import BrandTestDriveSection from "./components/BrandTestDriveSection";
 const API_RANKING_URL = "/api/sales/rankings";
 
 const bannerItems = [
-  { id: 1, img: "/banners/christmas-banner.png", link: "/cashback" },
+  { id: 1, img: "/banners/banner1.png", link: "/cashback" },
   { id: 2, img: "/banners/banner2.png", link: "/benefit" },
   { id: 3, img: "/banners/banner3.png", link: "/quote" },
 ];
