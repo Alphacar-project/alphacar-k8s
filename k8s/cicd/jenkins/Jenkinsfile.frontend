@@ -445,6 +445,8 @@ pipeline {
                                         -f Dockerfile \\
                                         -t ${imageFullTag} \\
                                         --cache-from ${ECR_REGISTRY}/${IMAGE_NAME}:latest \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=342d0463be260fc289926a0c63c4badc \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=c0a234db004e5673a965dcd0025df859 \\
                                         .
                                 """
                                 buildSuccess = true
@@ -456,6 +458,8 @@ pipeline {
                                         -f Dockerfile \\
                                         -t ${imageFullTag} \\
                                         --no-cache \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_REST_API_KEY=342d0463be260fc289926a0c63c4badc \\
+                                        --build-arg NEXT_PUBLIC_KAKAO_MAP_API_KEY=c0a234db004e5673a965dcd0025df859 \\
                                         .
                                 """
                                 buildSuccess = true
