@@ -371,19 +371,6 @@ pipeline {
                                                         sh """
                                                             echo '${qgResponse}' | jq -r '.projectStatus.conditions[] | select(.status != "OK") | "  - " + .metricKey + ": " + .status + " (현재: " + (.actualValue // "N/A") + ", 요구: " + (.errorThreshold // "N/A") + ")"' 2>/dev/null || echo '상세 정보 확인 불가'
                                                         """
-                                                        
-                                                        // new_violations 조건만 무시 (기준선 재설정 전 임시 조치)
-                                                        def failedConditions = sh(
-                                                            script: """
-                                                                echo '${qgResponse}' | jq -r '.projectStatus.conditions[] | select(.status != "OK") | .metricKey' 2>/dev/null || echo ''
-                                                            """,
-                                                            returnStdout: true
-                                                        ).trim()
-                                                        
-                                                        if (failedConditions.contains('new_violations') && failedConditions.split('\n').length == 1) {
-                                                            echo "⚠️ new_violations만 실패 - 기준선 재설정 필요하지만 빌드는 계속 진행"
-                                                            qgStatus = 'OK'
-                                                        }
                                                     }
                                                     
                                                     echo "✅ Quality Gate 상태: ${qgStatus}"
