@@ -33,6 +33,8 @@ spec:
           value: "https://alphacar.cloud"
         - name: NEXT_PUBLIC_KAKAO_MAP_API_KEY
           value: "c0a234db004e5673a965dcd0025df859"
+        - name: NEXT_PUBLIC_KAKAO_REST_API_KEY
+          value: "342d0463be260fc289926a0c63c4badc"
         - name: NODE_EXTRA_CA_CERTS
           value: "/etc/ssl/certs/selfsigned.crt"
         - name: NEXT_PUBLIC_AICHAT_URL
