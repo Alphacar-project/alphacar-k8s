@@ -192,12 +192,18 @@ function QuoteResultContent() {
         }
         
         if (selectedTrim) {
+            // 제원 정보 우선순위: selectedTrim.specifications > selectedTrim.selectedTrimSpecs > rawVehicleData.selectedTrimSpecs > rawVehicleData.specifications
+            const trimSpecs = selectedTrim.specifications || selectedTrim.selectedTrimSpecs || null;
+            const vehicleSpecs = rawVehicleData.selectedTrimSpecs || rawVehicleData.specifications || null;
+            const finalSpecs = trimSpecs || vehicleSpecs || null;
+            
             mergedDetail = {
                 ...rawVehicleData, // selectedTrimSpecs 포함
                 name: selectedTrim.trim_name, // 트림명
                 base_price: selectedTrim.price, // 트림 가격
                 options: selectedTrim.options || [], // 옵션 배열
                 imageUrl: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 메인페이지와 호환을 위한 imageUrl 필드 추가
+                selectedTrimSpecs: finalSpecs, // ✅ 선택된 트림의 전체 specifications (여러 소스에서 확인)
             };
         } else {
             mergedDetail = rawVehicleData;

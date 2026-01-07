@@ -549,6 +549,11 @@ function CompareQuoteContent() {
       }
 
       // 2. Vehicle + Trim 데이터 병합 (Card 컴포넌트가 기대하는 flat 구조 생성)
+      // 제원 정보 우선순위: selectedTrim.specifications > selectedTrim.selectedTrimSpecs > rawVehicleData.selectedTrimSpecs > rawVehicleData.specifications
+      const trimSpecs = selectedTrim.specifications || selectedTrim.selectedTrimSpecs || null;
+      const vehicleSpecs = rawVehicleData.selectedTrimSpecs || rawVehicleData.specifications || null;
+      const finalSpecs = trimSpecs || vehicleSpecs || null;
+      
       const mergedData: VehicleData = {
           ...rawVehicleData, // 상위 정보 (vehicle_name, brand_name, _id, etc.)
           name: selectedTrim.trim_name, // ✅ 트림명
@@ -557,7 +562,7 @@ function CompareQuoteContent() {
           image_url: rawVehicleData.main_image || rawVehicleData.image_url, // 이미지 URL 통합
           imageUrl: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 메인페이지와 호환을 위한 imageUrl 필드 추가
           main_image: rawVehicleData.main_image || rawVehicleData.image_url, // ✅ 추가 필드
-          selectedTrimSpecs: rawVehicleData.selectedTrimSpecs || null, // ✅ 선택된 트림의 전체 specifications
+          selectedTrimSpecs: finalSpecs, // ✅ 선택된 트림의 전체 specifications (여러 소스에서 확인)
       };
       
       return mergedData;
