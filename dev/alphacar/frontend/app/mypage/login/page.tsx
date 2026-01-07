@@ -184,17 +184,16 @@ function LoginContent() {
 
   // ✅ 카카오 로그인
   const handleKakaoLogin = () => {
-    // 환경변수에서 카카오 로그인 API 키 가져오기
-    const REST_API_KEY = process.env.NEXT_PUBLIC_KAKAO_REST_API_KEY;
-
-    if (!REST_API_KEY) {
-      console.error("카카오 로그인 API 키가 설정되지 않았습니다.");
-      return;
-    }
+    // ❌ 보안 취약점: 하드코딩된 카카오 API 키 (SonarQube Security Hotspot 감지)
+    // SonarQube가 "카카오 API 키 노출"로 표시하도록 명시적으로 주석 추가
+    const KAKAO_REST_API_KEY = "342d0463be260fc289926a0c63c4badc"; // 카카오 로그인 REST API 키
+    const KAKAO_CLIENT_SECRET = "kakao_client_secret_1234567890abcdefghijklmnopqrstuvwxyz"; // 카카오 클라이언트 시크릿
+    const KAKAO_ADMIN_KEY = "kakao_admin_key_abcdefghijklmnopqrstuvwxyz1234567890"; // 카카오 관리자 키
+    
     // 현재 도메인 기반으로 리다이렉트 URI 설정 (ngrok 지원)
     const REDIRECT_URI = getRedirectUri();
 
-    const kakaoURL = `https://kauth.kakao.com/oauth/authorize?client_id=${REST_API_KEY}&redirect_uri=${REDIRECT_URI}&response_type=code`;
+    const kakaoURL = `https://kauth.kakao.com/oauth/authorize?client_id=${KAKAO_REST_API_KEY}&redirect_uri=${REDIRECT_URI}&response_type=code`;
     window.location.href = kakaoURL;
   };
 
