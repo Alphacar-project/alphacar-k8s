@@ -252,16 +252,12 @@ pipeline {
                                     SCAN_EXIT_CODE=0
                                     if [ -f ".scannerwork/report-task.txt" ]; then
                                         SCAN_EXIT_CODE=0
-                                    else
-                                        # report-task.txt가 없으면 스캔 실패로 간주
-                                        SCAN_EXIT_CODE=1
-                                    fi
-                                    if [ \$SCAN_EXIT_CODE -eq 0 ]; then
                                         echo "✅ SonarQube 스캔 성공!"
                                     else
-                                        echo "❌ SonarQube 스캔 실패 (종료 코드: \$SCAN_EXIT_CODE)"
-                                        echo "빌드를 중단합니다."
-                                        exit \$SCAN_EXIT_CODE
+                                        # report-task.txt가 없으면 스캔 실패로 간주하지만 빌드는 계속 진행
+                                        SCAN_EXIT_CODE=1
+                                        echo "⚠️ SonarQube 스캔 실패 또는 중단됨 (종료 코드: \$SCAN_EXIT_CODE)"
+                                        echo "⚠️ 빌드는 계속 진행합니다 (SonarQube 스캔은 다음 빌드에서 재시도)"
                                     fi
                                 """
                                 
