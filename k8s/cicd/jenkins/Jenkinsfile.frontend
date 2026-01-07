@@ -437,9 +437,43 @@ pipeline {
                         // Docker 빌드 타임아웃 설정 (30분)
                         timeout(time: 30, unit: 'MINUTES') {
                             // Docker 빌드 (캐시 문제 발생 시 재시도)
-                            // 시연용: 더미 카카오 API 키 사용 (SonarQube 테스트용)
-                            def kakaoRestApiKey = "dummy_kakao_rest_api_key_for_sonarqube_test_12345"
-                            def kakaoMapApiKey = "dummy_kakao_map_api_key_for_sonarqube_test_12345"
+                            // Kubernetes Secret에서 실제 카카오 API 키 가져오기
+                            def kakaoRestApiKey = ""
+                            def kakaoMapApiKey = ""
+                            
+                            try {
+                                // Kubernetes Secret에서 카카오 API 키 가져오기
+                                def restApiKeySecret = sh(
+                                    script: "kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_REST_API_KEY}' 2>/dev/null | base64 -d || echo ''",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                def mapApiKeySecret = sh(
+                                    script: "kubectl get secret frontend-secret -n apc-fe-ns -o jsonpath='{.data.NEXT_PUBLIC_KAKAO_MAP_API_KEY}' 2>/dev/null | base64 -d || echo ''",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (restApiKeySecret && !restApiKeySecret.isEmpty()) {
+                                    kakaoRestApiKey = restApiKeySecret
+                                    echo "✅ Kubernetes Secret에서 카카오 REST API 키를 가져왔습니다."
+                                } else {
+                                    echo "⚠️ Kubernetes Secret에서 카카오 REST API 키를 찾을 수 없습니다. 더미 키를 사용합니다."
+                                    kakaoRestApiKey = "dummy_kakao_rest_api_key_for_sonarqube_test_12345"
+                                }
+                                
+                                if (mapApiKeySecret && !mapApiKeySecret.isEmpty()) {
+                                    kakaoMapApiKey = mapApiKeySecret
+                                    echo "✅ Kubernetes Secret에서 카카오 Map API 키를 가져왔습니다."
+                                } else {
+                                    echo "⚠️ Kubernetes Secret에서 카카오 Map API 키를 찾을 수 없습니다. 더미 키를 사용합니다."
+                                    kakaoMapApiKey = "dummy_kakao_map_api_key_for_sonarqube_test_12345"
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️ Kubernetes Secret 읽기 실패: ${e.getMessage()}"
+                                echo "⚠️ 더미 키를 사용합니다."
+                                kakaoRestApiKey = "dummy_kakao_rest_api_key_for_sonarqube_test_12345"
+                                kakaoMapApiKey = "dummy_kakao_map_api_key_for_sonarqube_test_12345"
+                            }
                             
                             def buildSuccess = false
                             try {
