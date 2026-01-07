@@ -79,7 +79,7 @@ export default function LeftAdBanner() {
           }}
         >
           <img
-            src="/ad/2026newyear-banner.png"
+            src="/ad/christmas-banner.png"
             alt="알파카 타고 크리스마스!!"
             style={{
               display: "block",
