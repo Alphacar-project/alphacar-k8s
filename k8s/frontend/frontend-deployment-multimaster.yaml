@@ -17,7 +17,7 @@ spec:
       serviceAccountName: frontend-sa
       containers:
       - name: frontend
-        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.72.0-dca7170
+        image: 382045063773.dkr.ecr.ap-northeast-2.amazonaws.com/alphacar/frontend:1.73.0-1984678
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
