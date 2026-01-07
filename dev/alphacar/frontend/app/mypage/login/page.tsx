@@ -186,6 +186,7 @@ function LoginContent() {
   const handleKakaoLogin = () => {
     // 환경변수에서 카카오 로그인 API 키 가져오기
     const REST_API_KEY = process.env.NEXT_PUBLIC_KAKAO_REST_API_KEY;
+
     if (!REST_API_KEY) {
       console.error("카카오 로그인 API 키가 설정되지 않았습니다.");
       return;
